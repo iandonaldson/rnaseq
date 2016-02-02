@@ -7,6 +7,8 @@
 # https://www.hpc.qmul.ac.uk/twiki/bin/view/HPC/ArrayJobsHowTo
 # http://wiki.gridengine.info/wiki/index.php/Simple-Job-Array-Howto
 
+# author: Ian Donaldson - i.donaldson@qmul.ac.uk
+
 # usage
 # review input params and then
 # qsub -o logs -e logs -t 1-380 tophat_array.qsub
@@ -16,16 +18,16 @@
 # -t 100-107 will carry out instructions on this range of lines
 # -t (number of tasks) could also be passed in the script below
 
-#these could be input parameters
-MANDATE_FILE="/data/WHRI-GenomeCentre/shares/Projects/Fluidigm_C1/Potter_Claire/GC-CP-4652/SequenceAnalysis_Ian/mandate/mandate-0301"
-SAMPLES_DIR="/data/WHRI-GenomeCentre/shares/Projects/Fluidigm_C1/Potter_Claire/GC-CP-4652/SequenceAnalysis_Ian/data"
-OUTPUT_DIR="/data/WHRI-GenomeCentre/shares/Projects/Fluidigm_C1/Potter_Claire/GC-CP-4652/SequenceAnalysis_Ian/results_tophat_0301"
+#set these parameters
+MANDATE_FILE="/path-to-mandate-file/mandate/mandate"
+SAMPLES_DIR="/path-to-data-dir-with-fastq.gz-files/data"
+OUTPUT_DIR="/path-to-results-dir/results_tophat"
 GTF=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92.gtf
-TRS_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92_TRX2
+TRS_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92_TRX
 GENOME_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92
 
 ###
-# no changes required beyond this point
+# no changes required beyond this point (except email)
 ###
 
 
@@ -33,7 +35,7 @@ GENOME_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92
 NUM_JOBS=$(wc -l < ${MANDATE_FILE})
 
 ##$ -m bes
-#$ -M i.donaldson@qmul.ac.uk
+#$ -M <your@email>
 #$ -cwd
 #$ -V    
 #$ -pe smp 4
