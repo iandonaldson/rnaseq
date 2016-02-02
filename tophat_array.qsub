@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# tophat_array.qsub
+#
+# array run version of submitting jobs to tophat
+# see following resources for tutorials on array runs
+# https://www.hpc.qmul.ac.uk/twiki/bin/view/HPC/ArrayJobsHowTo
+# http://wiki.gridengine.info/wiki/index.php/Simple-Job-Array-Howto
+
+# usage
+# review input params and then
+# qsub -o logs -e logs -t 1-380 tophat_array.qsub
+# note you must manually specify (in the above command) the directory for the logs since it is not possible to set these after qsub has started
+# -t 1:380 will carry out tasks (lines) 1 to 380 in mandate file
+# -t 234 will carry out only the task specified by line 234
+# -t 100-107 will carry out instructions on this range of lines
+# -t (number of tasks) could also be passed in the script below
+
+#these could be input parameters
+MANDATE_FILE="/data/WHRI-GenomeCentre/shares/Projects/Fluidigm_C1/Potter_Claire/GC-CP-4652/SequenceAnalysis_Ian/mandate/mandate-0301"
+SAMPLES_DIR="/data/WHRI-GenomeCentre/shares/Projects/Fluidigm_C1/Potter_Claire/GC-CP-4652/SequenceAnalysis_Ian/data"
+OUTPUT_DIR="/data/WHRI-GenomeCentre/shares/Projects/Fluidigm_C1/Potter_Claire/GC-CP-4652/SequenceAnalysis_Ian/results_tophat_0301"
+GTF=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92.gtf
+TRS_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92_TRX2
+GENOME_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92
+
+###
+# no changes required beyond this point
+###
+
+
+# number of jobs?
+NUM_JOBS=$(wc -l < ${MANDATE_FILE})
+
+##$ -m bes
+#$ -M i.donaldson@qmul.ac.uk
+#$ -cwd
+#$ -V    
+#$ -pe smp 4
+#$ -l h_rt=48:0:0
+#$ -l h_vmem=2G   
+##$ -t 1-3
+
+
+module load tophat
+module load bowtie2/2.0.0.beta6
+module load  samtools/0.1.18
+##
+## note - older versions of bowtie and samtools have been 
+## used because
+## tophat 2.0.9 might be incompatible with bowtie2/2.1.0
+## see this post
+## http://seqanswers.com/forums/showthread.php?t=24676
+
+
+#retrieve the variables for the job from the mandate file
+THIS_LINE=$(sed -n -e "$SGE_TASK_ID p" ${MANDATE_FILE})
+read -d "\t" -a THIS_ARRAY <<< ${THIS_LINE}
+SAMPLE_NAME=${THIS_ARRAY[0]}
+READ_1=${THIS_ARRAY[1]}
+READ_2=${THIS_ARRAY[2]}
+
+#each tophat result set will go into a subdirectory of the OUTPUT_DIR named after the sample
+#if [ ! -e ${OUTPUT_DIR} ]; then mkdir ${OUTPUT_DIR}; fi
+if [ ! -e ${OUTPUT_DIR}/${SAMPLE_NAME} ]; then mkdir -p ${OUTPUT_DIR}/${SAMPLE_NAME}; fi
+
+#log what will be done for this specfic task
+echo "starting tophat for ${SAMPLE_NAME} ${SAMPLES_DIR}/${READ_1} ${SAMPLES_DIR}/${READ_2}" >> ${OUTPUT_DIR}/start_tophat_qsubs.log
+echo "Number of jobs is ${NUM_JOBS} and task id is ${SGE_TASK_ID}" >> ${OUTPUT_DIR}/start_tophat_qsubs.log
+echo "Number of jobs is ${NUM_JOBS} and this task id is ${SGE_TASK_ID} for sample ${SAMPLE_NAME}"
+
+#do it
+tophat	-p 4 \
+        -o ${OUTPUT_DIR}/${SAMPLE_NAME} \
+	--GTF ${GTF} \
+	--transcriptome-index  ${TRS_IDX} \
+	${GENOME_IDX} \
+	${SAMPLES_DIR}/${READ_1} \
+	${SAMPLES_DIR}/${READ_2}
+
+
+
+
+#### end tophat_array.qsub
