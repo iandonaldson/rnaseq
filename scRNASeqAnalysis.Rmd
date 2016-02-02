@@ -1,0 +1,766 @@
+---
+title: "scRNASeqAnalysis"
+author: "Ian Donaldson"
+date: "18/01/2016"
+output: html_document
+---
+
+
+### About this analysis
+
+This protocol is based on the R script included in:
+```
+Accounting for technical noise in single-cell RNA-seq experiments
+http://www.nature.com/nmeth/journal/v10/n11/full/nmeth.2645.html
+and supplementary data at
+http://www.nature.com/nmeth/journal/v10/n11/full/nmeth.2645.html#supplementary-information
+```
+
+```{r install_packages, echo=FALSE, eval=FALSE, cache=TRUE}
+#this code only needs to be run if you are setting up the development environment for the first time
+#it may be necessary to run this code as root depending on your set up
+#and it may be necessary to install or update several linux libs on your system
+#besides libraries required for R installation (https://cran.r-project.org/doc/manuals/r-release/R-admin.html#Essential-programs-and-libraries)
+#you must also install the R packages knitr, yaml, htmltools, caTools, bitops and rmarkdown in order to create html documents from this .Rmd file 
+
+### from bioconductor
+source("http://bioconductor.org/biocLite.R")
+
+## DESeq - note, a DESeq2 is available
+# https://bioconductor.org/packages/release/bioc/html/DESeq.html
+biocLite("DESeq")
+#browseVignettes("DESeq")
+
+
+## genefilter
+#  https://bioconductor.org/packages/release/bioc/html/genefilter.html
+biocLite("genefilter") 
+
+## EBImage
+#  https://bioconductor.org/packages/release/bioc/html/EBImage.html
+# requires sudo yum install fftw-devel
+biocLite("EBImage")
+#browseVignettes("EBImage")
+
+## TopGO
+#  https://bioconductor.org/packages/release/bioc/html/topGO.html
+biocLite("topGO")
+
+## org.At.tair.db
+#  https://bioconductor.org/packages/release/data/annotation/html/org.At.tair.db.html
+biocLite("org.At.tair.db")
+
+### from CRAN
+## statmod
+#  https://cran.r-project.org/web/packages/statmod/index.html
+install.packages("statmod")
+
+```
+### Setup environment
+
+The following packages are used throughout this analysis.
+
+```{r setup_environment, echo=TRUE, results='hide', cache=TRUE}
+
+library( DESeq )
+library( genefilter )
+library( EBImage )
+library( statmod )
+library( topGO )
+
+#save graphical parameters
+opar <- par()
+#and restore with
+#par(opar)
+#opar
+
+sessionInfo()
+
+
+```
+
+### Loading and examining starting data
+
+From the mapped reads and the GTF files, we counted reads for each gene using htseq-count (http://www-huber. embl.de/users/anders/HTSeq/). The read count table is available in the accompanying sub-directory as a tab-delimited file: ```data/consolidated_raw_counts_final```
+
+
+```{r load_data, echo=TRUE, cache=TRUE}
+inputTable <- "data/consolidated_raw_counts_final"
+dataRawCounts <- read.table(inputTable, header=TRUE, sep="\t", row.names = 1, quote="", 
+stringsAsFactors = FALSE)
+```
+
+### A quick look at the raw data
+
+The dimensions of the raw data table are: `r dim(dataRawCounts)`.
+
+The first 10 rows and 5 columns look like this:
+
+```{r peek1, echo=FALSE, cache=TRUE}
+
+dataRawCounts[1:10,1:5]
+
+```
+
+Number of zero counts are: `r sum(dataRawCounts == 0)`.
+
+Number of non-zero counts are: `r sum(dataRawCounts != 0)`.
+
+Percentage of non-zero counts are: `r sum(dataRawCounts != 0)/sum(dataRawCounts == 0) * 100`.
+
+The number of duplicated row-names is: `r sum(duplicated(rownames(dataRawCounts)))`.
+
+The number of missing (NA) data is: `r sum(is.na(dataRawCounts))`.
+
+```{r raw_data_check, echo=FALSE, eval=FALSE, cache=TRUE}
+
+#quick examination
+dataRawCounts[ 1:10, 1:5 ]
+head(colnames(dataRawCounts))
+head(rownames(dataRawCounts))
+sum(duplicated(rownames(dataRawCounts)))
+sum(is.na(dataRawCounts))
+sum(dataRawCounts == 0)
+sum(dataRawCounts != 0)
+sum(dataRawCounts != 0)/sum(dataRawCounts == 0)
+#str(dataRawCounts)
+dim(dataRawCounts)
+
+```
+
+### Separation of counts from the experimental organism and the ERCC spike-in control.
+
+The raw counts data is split into two sub-tables, one with the ERCC spikes, (countsERCC) and one with the organism genes (countsOrgGenes). 
+
+
+```{r split_data, echo=TRUE, eval=TRUE, cache=TRUE}
+
+isSpikeIn <- substr( rownames(dataRawCounts), 1, 5 ) == "ERCC-"
+geneTypes <- factor(isSpikeIn, labels=c("OrgGene", "ERCC"))
+
+countsERCC <- dataRawCounts[ isSpikeIn, ]
+countsOrgGenes <- dataRawCounts[ !isSpikeIn, ]
+
+```
+
+The dimensions of the countsOrgGenes table are: `r dim(countsOrgGenes)`.
+
+The dimensions of the countsERCC table are: `r dim(countsERCC)`.
+
+The first few rows of countsERCC look like this:
+```{r peek_ERCC, echo=FALSE, eval=TRUE, cache=TRUE}
+countsERCC[1:10, 1:5]
+```
+
+### Ratio of ERCC to organism counts
+
+As a first sanity check, lets look at the total number of counts in each sample that aligned to ERCC92 spike-ins or organism genes and the ratio of these two and their distribution.  This information is sumarized below and a table of the table is in ```table/totalCounts.tsv```.
+
+```{r ERCC2Gene_ratios, echo=TRUE, eval=TRUE, cache=TRUE}
+
+sumsERCC <- colSums(countsERCC)
+sumsOrgGenes <- colSums(countsOrgGenes)
+ERCC2GeneRatio <- sumsERCC/sumsOrgGenes
+plot(log2(ERCC2GeneRatio), xlab="sample index")
+abline(h=1)
+boxplot(log2(ERCC2GeneRatio))
+totalCounts<-cbind(sumsERCC,sumsOrgGenes,ERCC2GeneRatio)
+head(totalCounts)
+write.table(totalCounts, file="tables/totalCounts.tsv", quote=FALSE, sep="\t")
+summary(totalCounts)
+```
+
+### Calculate Size factors
+
+Size factors are calculated for the organism gene counts and the spike-in controls.
+
+```{r size_factors, echo=TRUE, eval=TRUE, cache=TRUE}
+require(DESeq)
+sfOrgGenes <- estimateSizeFactorsForMatrix( countsOrgGenes )
+sfERCC <- estimateSizeFactorsForMatrix( countsERCC )
+sf <- rbind( sfOrgGenes, sfERCC )
+sf[1:2, 1:5]
+```
+
+### EDA of size factors
+
+This section examines size factors and expression data to identify samples that could be excluded from further analysis.  All samples are included in this workflow - if samples are identified that could be excluded, they will be excluded in a separate analysis from this one.  
+
+```{r eda, echo=TRUE, eval=TRUE, cache=TRUE}
+#take a peek and identify possible outliers
+summary(sfOrgGenes)
+summary(sfERCC)
+boxplot(sfOrgGenes)
+boxplot(sfERCC)
+
+#Are there any size factors that are possible outliers - more than 3 sd from mean
+ll<-mean(sfOrgGenes) - 3*sd(sfOrgGenes)
+ul<-mean(sfOrgGenes) + 3*sd(sfOrgGenes)
+
+
+plot(sfOrgGenes)
+abline(h=ll, col="blue")
+abline(h=ul, col="red")
+
+# collect info about possible outliers - high
+if (length(which(sfOrgGenes > ul)) > 0 ) { 
+  print(sf[,c(sfOrgGenes > ul)]); cat("****\n\n")
+  print(which(sfOrgGenes > ul)); cat("****\n\n")
+  print(summary(log10(countsOrgGenes[,which(sfOrgGenes > ul)]+1))); cat("****\n\n")
+  boxplot(log10(countsOrgGenes[,which(sfOrgGenes > ul)]+1))
+}
+
+# collect info about possible outliers - low
+if (length(which(sfOrgGenes < ll)) > 0 ) { 
+  print(sf[,c(sfOrgGenes < ll)]); cat("****\n\n")
+  print(which(sfOrgGenes < ll)); cat("****\n\n")
+  print(summary(log10(countsOrgGenes[,which(sfOrgGenes < ll)]+1))); cat("****\n\n")
+  boxplot(log10(countsOrgGenes[,which(sfOrgGenes < ll)]+1))
+}
+
+```
+
+### EDA of zero counts, non-zero counts, sample means, non-zero-sample-means, etc.
+
+This section needs to be cleaned up
+
+```{r eda_2, echo=FALSE, eval=FALSE, cache=TRUE}
+#look further for differences in these samples from number of zero counts and means of all others
+#how many genes have zero counts in each sample 
+sampleNumZeros<-apply(countsOrgGenes, 2, function(x) sum(x==0))
+summary(sampleNumZeros)
+hist(sampleNumZeros)
+boxplot(sampleNumZeros)
+sd(sampleNumZeros)
+x<-rnorm(n=length(sampleNumZeros), mean=mean(sampleNumZeros), sd=sd(sampleNumZeros))
+qqplot(x,sampleNumZeros)
+abline(0,1, col="black")
+abline(h=mean(sampleNumZeros))
+
+abline(h=sum(countsOrgGenes[,27] == 0), col="blue")
+abline(h=sum(countsOrgGenes[,30] == 0), col="red")
+#so number of zeros seems almost normally dist and the potential outlier samples have somewhat fewer than the mean number of zeros but still well within one sd.
+
+
+#look at dist of non-zero counts 
+sampleNonZeros<-apply(countsOrgGenes, 2, function(x) sum(x!=0))
+summary(sampleNonZeros)
+hist(sampleNonZeros)
+boxplot(sampleNonZeros)
+plot(sampleNonZeros) 
+plot(log2(sampleNonZeros))
+
+
+par(mar=c(5,4,4,2)+.1,pin=c(6.5,4.5))
+plot(sampleNonZeros[order(sampleNonZeros)], main="number of genes with non-zero counts in each sample") 
+abline(h=mean(sampleNonZeros))
+dev.copy(png, "figures/number-of-genes-with-non-zero-counts-in-each-sample.png")#<== saved this
+dev.off()
+
+
+plot(log2(sampleNonZeros[order(sampleNonZeros)]))
+abline(h=log2(mean(sampleNonZeros)))
+
+sd(sampleNonZeros)
+
+xx<-rnorm(n=length(sampleNonZeros), mean=mean(sampleNonZeros), sd=sd(sampleNonZeros))
+qqplot(xx,sampleNonZeros)
+abline(0,1, col="black")
+abline(h=mean(sampleNonZeros)) #<== show this
+mean(sampleNonZeros)
+
+#take a look at distribution of sample means
+sampleMeans<-apply(countsOrgGenes, 2, function(x) mean(x))
+summary(sampleMeans)
+hist(sampleMeans)
+boxplot(sampleMeans)
+sd(sampleMeans)
+x<-rnorm(n=length(sampleMeans), mean=mean(sampleMeans), sd=sd(sampleMeans))
+qqplot(x,sampleMeans)
+abline(0,1)
+ul=(mean(sampleMeans) + 3*sd(sampleMeans))
+ll=(mean(sampleMeans) - 3*sd(sampleMeans))
+abline(h=mean(sampleMeans), col="black")
+abline(h=mean(countsOrgGenes[,27]), col="red")
+abline(h=mean(countsOrgGenes[,30]), col="blue")
+abline(h=ul)
+abline(h=ll)
+#so means of samples are near normally distributed - there are samples at both ends of the distribution but nothing that warrants throwing away any samples
+
+##### new
+
+#take a look at distribution of non-zero sample means
+sampleMeans<-apply(countsOrgGenes, 2, function(x) mean(x[x!=0]))
+summary(sampleMeans)
+hist(sampleMeans)
+boxplot(sampleMeans)
+sd(sampleMeans)
+x<-rnorm(n=length(sampleMeans), mean=mean(sampleMeans), sd=sd(sampleMeans))
+qqplot(x,sampleMeans)
+abline(0,1)
+ul=(mean(sampleMeans) + 3*sd(sampleMeans))
+ll=(mean(sampleMeans) - 3*sd(sampleMeans))
+abline(h=mean(sampleMeans), col="black")
+abline(h=ul, col="green")
+abline(h=ll, col="red")
+
+
+#just plot the nonzero sample means
+plot(sampleMeans[order(sampleMeans)]) #<== Potter show this
+ul=(mean(sampleMeans) + 3*sd(sampleMeans))
+ll=(mean(sampleMeans) - 3*sd(sampleMeans))
+abline(h=mean(sampleMeans), col="black")
+abline(h=ul, col="green")
+abline(h=ll, col="red")
+
+#plot sample means versus number of non-zero genes in each sample
+#Chip1/2/3
+chipID <- substr( names(sampleMeans), 1, 5 )
+chipTypes <- factor(chipID, labels=c("Chip2","Chip3"))
+par(pin=c(6.5,4.5))
+plot(sampleNonZeros, sampleMeans, xlab="number of non-zero genes in sample", ylab="mean of non-zero counts in sample", main="mean-non-zero counts versus non-zero genes", col=chipTypes) #<== show this
+dev.copy(png, "figures/mean-non-zero-counts-versus-non-zero-genes.png")
+dev.off()
+
+##################
+# this is probably the most informative summary figure
+# could do this also for ERCC
+##################
+
+
+
+#######
+#repeat the same just for the ERCC counts
+#######
+chipID <- substr( colnames(countsERCC), 1, 5 )
+chipTypes <- factor(chipID, labels=c("Chip2","Chip3"))
+######
+par(pin=c(6.5,4.5))
+spikeinNonZeros<-apply(countsERCC, 2, function(x) sum(x!=0))
+summary(spikeinNonZeros)
+plot(spikeinNonZeros, col=chipTypes, ylab="nummber of non-zero spike-ins", xlab="sample-id", main="number of ERCC controls with non-zero counts") #<== there are diffrences between Chips 2 and 3 - but not at all evident from looking at counts of genes from organism - why
+dev.copy(png, "figures/4.number-of-non-zero-ercc-spikeins-per-sample.png")
+dev.off()
+
+#just plot the nonzero sample means
+par(pin=c(6.5,4.5))
+spikeinMeans<-apply(countsERCC, 2, function(x) mean(x[x!=0]))
+plot(spikeinMeans[order(spikeinMeans)], col=chipTypes, ylab="mean of non-zero spike-ins", xlab="sample-id", main="mean counts for ERCC controls with non-zero counts") #<==  show this
+ul=(mean(spikeinMeans) + 3*sd(spikeinMeans))
+ll=(mean(spikeinMeans) - 3*sd(spikeinMeans))
+abline(h=mean(spikeinMeans), col="black")
+abline(h=ul, col="green")
+abline(h=ll, col="red")
+dev.copy(png, "figures/5.mean-non-zero-ercc-spikeins-per-sample.png")
+dev.off()
+
+#plot sample means versus number of non-zero genes in each sample
+#Chip1/2/3
+chipID <- substr( names(spikeinMeans), 1, 5 )
+chipTypes <- factor(chipID)
+plot(spikeinNonZeros, spikeinMeans, xlab="number of non-zero spike-ins in sample", ylab="mean of non-zero counts in sample", main="mean-non-zero counts versus non-zero spike-ins (controls)", col=chipTypes) #<==  show this
+
+```
+
+
+
+So, after an examination of number of zeros and means in each sample, there are no obvious outliers (using ESD method - +/- 3 sd from mean).
+
+Next, I will look for structure in the data (different groups of related samples) using hclust and PCA.
+
+### EDA of sample data: hierarchical clustering
+
+hclust of samples - looking for unexpected structure in samples - skipped
+
+pca of raw data - skipped
+
+
+
+### Normalize count data by the size factors.
+
+```{r normalize_counts, echo=TRUE, eval=TRUE, cache=TRUE}
+
+nCountsERCC <- t( t(countsERCC) / sfERCC )
+nCountsOrgGenes <- t( t(countsOrgGenes) / sfOrgGenes )
+
+```
+
+### Then calculate the sample moments
+
+```{r sample_moments, echo=TRUE, eval=TRUE, cache=TRUE}
+
+meansERCC <- rowMeans( nCountsERCC )
+varsERCC <- rowVars( nCountsERCC )
+cv2ERCC <- varsERCC / meansERCC^2
+meansOrgGenes <- rowMeans( nCountsOrgGenes )
+varsOrgGenes <- rowVars( nCountsOrgGenes )
+cv2OrgGenes <- varsOrgGenes / meansOrgGenes^2
+
+```
+
+
+### Fit technical noise
+
+Decide on data to use for the fit.  Since we have only a few spike-in controls, the authors of the method suggest being "a bit more generous with the mean cut-off" and use the 80-percentile instead of the 95-percentile as they did when using a whole exogenous-genome as a spike-in.
+
+```{r select_data, echo=TRUE, eval=TRUE, cache=TRUE}
+
+minMeanForFitA <- unname( quantile( meansERCC[ which( cv2ERCC > .3 ) ], .8 ) )
+useForFitA <- meansERCC >= minMeanForFitA
+minMeanForFitA
+table( useForFitA )
+
+```
+
+### Perform the fit
+
+A second fit can be performed using length-adjusted counts.  This has not been done here.
+
+```{r fitA, echo=TRUE, eval=TRUE, cache=TRUE}
+
+fitA <- glmgam.fit( cbind( a0 = 1, a1tilde = 1/meansERCC[useForFitA] ), cv2ERCC[useForFitA] )
+
+# TODO - not done yet
+# fitB <- glmgam.fit( cbind( a0 = 1, a1tilde = 1/meansERCCPK[useForFitB] ), cv2ERCC[useForFitB] )
+
+# how much variance do the two fits explain?
+residualA <- var( log( fitted.values(fitA) ) - log( cv2ERCC[useForFitA] ) )
+totalA <- var( log( cv2ERCC[useForFitA] ) )
+A = 1 - residualA / totalA
+A
+
+
+```
+
+The fraction of variation in the data explained by the model is `r A`.
+
+### Plot the fit.
+
+```{r plot_fit, echo=TRUE, eval=TRUE, cache=TRUE}
+plot( meansERCC, cv2ERCC, log="xy", col=1+useForFitA, main="A" )
+xg <- 10^seq( -3, 5, length.out=100 )
+lines( xg, coefficients(fitA)["a0"] + coefficients(fitA)["a1tilde"]/xg )
+segments( meansERCC[useForFitA], cv2ERCC[useForFitA], meansERCC[useForFitA], fitA$fitted.values, col="gray" )
+```
+
+### Find genes with high variance
+
+
+```{r find_high_var, echo=TRUE, eval=TRUE, cache=TRUE}
+
+
+#select level of variation sought at some specified FDR level
+soughtVariation<-0.5
+FDR<-0.1
+
+minBiolDisp <- soughtVariation^2
+xi <- mean( 1 / sfERCC )
+m <- ncol(countsOrgGenes)
+psia1thetaA <- mean( 1 / sfERCC ) +
+   ( coefficients(fitA)["a1tilde"] - xi ) * mean( sfERCC / sfOrgGenes )
+cv2thA <- coefficients(fitA)["a0"] + minBiolDisp + coefficients(fitA)["a0"] * minBiolDisp
+testDenomA <- ( meansOrgGenes * psia1thetaA + meansOrgGenes^2 * cv2thA ) / ( 1 + cv2thA/m )
+pA <- 1 - pchisq( varsOrgGenes * (m-1) / testDenomA, m-1 )
+padjA <- p.adjust( pA, "BH" )
+table( padjA < FDR ) 
+### <-- this vector points to 'statistically significant' genes
+###     after BH multiple-hypothesis testing correction  
+nSigVarGenes <- table( padjA < FDR )[2]
+#note - TRUE + FALSE  (for padjA < FDR) do not add to number of genes here because any 
+#genes with all zero counts will be NaN.
+
+```
+
+### Summarize number of genes with significant variation in expression
+
+Out of a total of `r length(padjA)` genes there are `r nSigVarGenes` that have significant variation 
+
+### Make a summary of data so far
+
+The finalATable is a gene x sample table containing the normalized gene-count data ordered such that most significantly varying genes are at the top of the table.  In addition, th efirst few coumns contain data that summarizes the gene-count data across all samples; for each gene:
+
+1. padjAOrd - p-value for significance of variation for this gene
+2. meansOrgGenesOrd - mean counts for this gene across all samples
+3. nonZeroOrgGenesOrd - number of non-zero counts for this gene across all samples
+4. bigCountsOrgGenesOrd - number of samples with counts for this gene that exceed some threshold (default 100)
+5. varsOrgGenesOrd - variance in counts for this gene across all samples
+6. cv2OrgGenesOrd - cv2 in counts for this gene across all samples
+
+Additional columns list normalized gene counts for each sample.
+
+The table is written as a tab-delimited file in '''tables/finalATable.tsv''' and as an R object '''tables/finalATable'''.  A subset of the data containinig only those genes (rows) with significant variation is also written to disk as a tab-delimited table in '''tables/sigATable.tsv'''.
+
+
+```{r summarize_high_var, echo=TRUE, eval=TRUE, cache=TRUE}
+
+#consolidate output - order by p-value significance of variance
+thisOrder<-order(padjA, decreasing = FALSE)
+padjAOrd <-padjA[thisOrder]
+countsOrgGenesOrd<-countsOrgGenes[thisOrder,]
+nCountsOrgGenesOrd<-nCountsOrgGenes[thisOrder,]
+
+# assemble a gene x sample table with summary counts showing
+# mean counts, non-zero counts, and big counts for each genes
+meansOrgGenes <- rowMeans( nCountsOrgGenes )
+nonZeroOrgGenes <- apply(nCountsOrgGenes, 1, function(x) sum(x != 0))
+nonZeroOrgGenesOrd <- nonZeroOrgGenes[thisOrder]
+meansOrgGenesOrd<-meansOrgGenes[thisOrder]
+bigCounts <- 100 # set this to examine number of genes whose counts exceed some threshold in a sample
+bigCountsOrgGenes <- apply(nCountsOrgGenes, 1, function(x) sum(x > bigCounts))
+bigCountsOrgGenesOrd <- bigCountsOrgGenes[thisOrder]
+varsOrgGenesOrd<-varsOrgGenes[thisOrder]
+cv2OrgGenesOrd<-cv2OrgGenes[thisOrder]
+finalATable <- as.data.frame(cbind(padjAOrd,meansOrgGenesOrd, nonZeroOrgGenesOrd, bigCountsOrgGenesOrd, varsOrgGenesOrd,cv2OrgGenesOrd,nCountsOrgGenesOrd))
+
+#make subsets of the data for later use in this script
+sigATable<- finalATable[1:nSigVarGenes,]
+#order rows by the means
+thisOrder<-order(sigATable[,2], decreasing=TRUE)
+sigATable<-sigATable[thisOrder, ]
+#now limit table to just the count data
+sigACounts <- sigATable[,7:(dim(sigATable)[2])]
+
+
+#save data so far
+write.table(finalATable, file="tables/finalATable.tsv", sep="\t")
+write.table(sigATable, file="tables/sigATable.tsv", sep="\t")
+
+save(finalATable, sigATable, sigACounts, file="tables/saved_data")
+
+
+#####
+
+
+
+
+
+
+
+
+
+
+
+```
+
+
+The first 20 rows and 8 columns of the finalATable look like this:
+
+
+```{r peek_finalATable, echo=FALSE, eval=TRUE, cache=TRUE}
+
+finalATable[1:20, 1:8]
+
+# various plots of means versus variation
+
+#plot(finalATable$meansOrgGenesOrd, finalATable$varsOrgGenesOrd, col=factor(finalATable$padjAOrd < 0.05))
+
+# plot(log2(finalATable$meansOrgGenesOrd), finalATable$varsOrgGenesOrd, col=factor(finalATable$padjAOrd < 0.05))
+
+# plot(log2(finalATable$meansOrgGenesOrd), log2(finalATable$varsOrgGenesOrd), col=factor(finalATable$padjAOrd < 0.05))
+
+#plot(log2(finalATable$meansOrgGenesOrd), (finalATable$cv2OrgGenesOrd), col=factor(finalATable$padjAOrd < 0.05))
+
+#plot(log2(finalATable$meansOrgGenesOrd), log2(finalATable$cv2OrgGenesOrd), col=factor(finalATable$padjAOrd < 0.05))
+
+
+# plots comparing counts from 2 samples
+
+#plot((finalATable[,34]), (finalATable[,45]), col=factor(finalATable$padjAOrd < 0.05))
+#abline(0,1)
+
+#plot(log2(finalATable[,34]+1), log2(finalATable[,45]+1), col=factor(finalATable$padjAOrd < 0.05))
+#abline(0,1)
+
+#plot(log2(finalATable[,9]+1), log2(finalATable[,56]+1), col=factor(finalATable$padjAOrd < 0.05))
+#abline(0,1)
+
+plot(log10(finalATable[,9]+1), log10(finalATable[,56]+1), col=factor(finalATable$padjAOrd < 0.05))
+abline(0,1)
+
+```
+
+### Plot mean count versus variation
+
+The figure below shows log10 of means versus log10 of cv2 for each gene.  Red dots have statistically significant variation.  Two genes are hi-lighted (as X); they are CXCL8 and STK10.  ERCC spike-ins are overlaid on the plot as circles.
+
+```{r plot_meanVcv2, echo=TRUE, eval=TRUE, cache=TRUE}
+
+#plot mean count versus variation
+plot(log10(finalATable$meansOrgGenesOrd), log10(finalATable$cv2OrgGenesOrd), pch=".", col="blue") 
+points(log10(finalATable$meansOrgGenesOrd[1:nSigVarGenes]), log10(finalATable$cv2OrgGenesOrd[1:nSigVarGenes]), pch=".", col="red")
+points(log10(sigATable$meansOrgGenesOrd[1:361]), log10(sigATable$cv2OrgGenesOrd[1:361]), pch=".", col="red")
+
+#try to high-light a few specific genes
+thisGene<-which(rownames(finalATable) == "CXCL8")
+points(log10(finalATable$meansOrgGenesOrd[thisGene]), log10(finalATable$cv2OrgGenesOrd[thisGene]), pch="x", col="black")
+
+thisGene<-which(rownames(finalATable) == "STK10")
+points(log10(finalATable$meansOrgGenesOrd[thisGene]), log10(finalATable$cv2OrgGenesOrd[thisGene]), pch="x", col="black")
+
+#identifying a point on a graph - #does not work - possibly need a lib like X11 or quartz - see man page for indentify
+#with(finalATable, identify(meansOrgGenesOrd,cv2OrgGenesOrd, labels=row.names(finalATable))) 
+#identify()
+
+#try to overlay ERCC spike-ins
+points(log10(meansERCC), log10(cv2ERCC), col=1+useForFitA, pch="o")
+
+```
+
+### PCA of normalized counts
+
+The first figure shows a scree plot of the principle components from a PCA of normalized counts for all genes.  This is followed by three plots showing the projections of the samples onto the pairwise combinations of the first three PC's.  Finally, the gene-weightings for the first three PCs are shown.  
+
+```{r pca_of_ncounts, echo=TRUE, eval=TRUE, cache=TRUE}
+
+nCountsOrgGenesLogged <- log10(nCountsOrgGenes+1)
+princ <- prcomp(t(nCountsOrgGenesLogged))
+
+#look at the scree plot - first component covers greatest proportion of variance
+plot(princ, main="scree plot for PCs - normalized counts")
+
+#make the first three pairwise projections
+nComp <- 2
+project <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,1:nComp]
+project23 <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,2:3]
+project13 <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,c(1,3)]
+
+# set up for labelling
+#Chip2/3
+isChip2 <- substr( rownames(project), 1, 5 ) == "Chip2"
+#cluster 1/2
+isCluster1 <- project[,1] < 1
+
+
+#plot the first three pairwise projections
+plot(project, col=isChip2+1, main="PC1 versus PC2 - normalized counts")
+abline(h=0); abline(v=0)
+plot(project23, col=isChip2+1, main="PC2 versus PC3 - normalized counts")
+abline(h=0); abline(v=0)
+plot(project13, col=isChip2+1,  main="PC1 versus PC3 - normalized counts")
+abline(h=0); abline(v=0)
+
+
+
+#look at the first principle component
+thisorder<-order(abs(princ$rotation[,1]), decreasing=TRUE)
+component_1<-princ$rotation[thisorder,1]
+component_1[1:40]
+plot(abs(component_1[1:40]), xaxt="n", xlab="Gene", ylab="abs(weighting)", main="PC1 weightings") 
+axis(1, at=1:40, labels=names(component_1)[1:40], las=2, cex.axis=0.5)
+
+
+#look at the second principle component
+thisorder<-order(abs(princ$rotation[,2]),decreasing=TRUE)
+component_2<-princ$rotation[thisorder,2]
+component_2[1:40]
+plot(abs(component_2[1:40]), xaxt="n", xlab="Gene", ylab="abs(weighting)", main="PC2 weightings")
+axis(1, at=1:40, labels=names(component_2)[1:40], las=2, cex.axis=0.5)
+
+#look at the third principle component
+thisorder<-order(abs(princ$rotation[,3]),decreasing=TRUE)
+component_3<-princ$rotation[thisorder,3]
+component_3[1:40]
+plot(abs(component_3[1:40]), xaxt="n", xlab="Gene", ylab="abs(weighting)", main="PC3 weightings")
+axis(1, at=1:40, labels=names(component_2)[1:40], las=2, cex.axis=0.5)
+
+```
+
+
+### PCA of normalized counts for significant variance genes only
+
+This section varies from the previous only in that the genes being included in the PCA analysis are limited to those showing significant variation.
+
+The first figure shows a scree plot of the principle components from a PCA of normalized counts for all genes.  This is followed by three plots showing the projections of the samples onto the pairwise combinations of the first three PC's.  Finally, the gene-weightings for the first three PCs are shown.  
+
+```{r}
+
+# only these two lines differ from above PCA
+sigACountsLogged <- log10(sigACounts+1)
+princ <- prcomp(t(sigACountsLogged))
+
+#look at the scree plot - first component covers greatest proportion of variance
+plot(princ, main="scree plot for PCs - sig normalized counts")
+
+#make the first three pairwise projections
+nComp <- 2
+project <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,1:nComp]
+project23 <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,2:3]
+project13 <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,c(1,3)]
+
+# set up for labelling
+#Chip2/3
+isChip2 <- substr( rownames(project), 1, 5 ) == "Chip2"
+#cluster 1/2
+isCluster1 <- project[,1] < 1
+
+
+#plot the first three pairwise projections
+plot(project, col=isChip2+1, main="PC1 versus PC2 - sig normalized counts")
+abline(h=0); abline(v=0)
+plot(project23, col=isChip2+1, main="PC2 versus PC3 - sig normalized counts")
+abline(h=0); abline(v=0)
+plot(project13, col=isChip2+1,  main="PC1 versus PC3 - sig normalized counts")
+abline(h=0); abline(v=0)
+
+
+
+#look at the first principle component
+thisorder<-order(abs(princ$rotation[,1]), decreasing=TRUE)
+component_1<-princ$rotation[thisorder,1]
+component_1[1:40]
+plot(abs(component_1[1:40]), xaxt="n", xlab="Gene", ylab="abs(weighting)", main="PC1 weightings") 
+axis(1, at=1:40, labels=names(component_1)[1:40], las=2, cex.axis=0.5)
+
+
+#look at the second principle component
+thisorder<-order(abs(princ$rotation[,2]),decreasing=TRUE)
+component_2<-princ$rotation[thisorder,2]
+component_2[1:40]
+plot(abs(component_2[1:40]), xaxt="n", xlab="Gene", ylab="abs(weighting)", main="PC2 weightings")
+axis(1, at=1:40, labels=names(component_2)[1:40], las=2, cex.axis=0.5)
+
+
+#look at the third principle component
+thisorder<-order(abs(princ$rotation[,3]),decreasing=TRUE)
+component_3<-princ$rotation[thisorder,3]
+component_3[1:40]
+plot(abs(component_3[1:40]), xaxt="n", xlab="Gene", ylab="abs(weighting)", main="PC3 weightings")
+axis(1, at=1:40, labels=names(component_2)[1:40], las=2, cex.axis=0.5)
+
+
+```
+
+
+
+TODO
+for this script
+-include EDA of starting data - examine means, number of non-zero counts etc.
+-generalize chip-label code
+-show heatmaps before and after
+-show PCA before normalization
+
+for Gibbons-specific analysis
+-include correlation analyses -pearson and spearman
+-include analysis of T4 cells
+-see to do list
+
+
+-plot for each sample, seq depth (number of reads versus number of genes detected)
+-try doing normalization using RUV package - normalizes against house-keeping genes
+-find genes that have reliable counts but no variation
+-show graphs of counts for means of gene-counts for one set of samples versus another
+
+-reread DeSeq package and compare to DeSeq2
+-look at hr package for rnaseq analysis
+-look at iris - immune response in silico
+-look at github page for Martin Hernberg - they will have best practices -also SC3 cluster package
+-look at EdgeR package
+-look at Scater package
+-look at Alekandra Kolodziejczyk paper (Teichman group)
+-cluster (PCA) using pluripotency and differentiation markers, G2M markers (cyclebase.org), MSigDb, Reactome
+-look at Oct4 (homogenous) and Nanog (herterogenous express) in mouse cells
+-see FactorialLVM (lent variable modelling) a la Oliver Stegle 
+
+other
+work on protocol to identify points on a graph
+
