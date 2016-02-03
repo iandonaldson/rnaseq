@@ -1,0 +1,77 @@
+#!/bin/bash
+
+# htseq_array.qsub
+#
+# array run version of htseq-count
+# see http://www-huber.embl.de/users/anders/HTSeq/doc/count.html
+# author: Ian Donaldson - i.donaldson@qmul.ac.uk
+#
+# usage
+# qsub -o logs -e logs -t 1-95 htseq_array.qsub
+# where
+# -o and -e specify paths to an exsting directory where output and error logs from each job will be posted
+# -t is the number of tasks (number of samples whose bam files should be merged)
+#
+# below, specify a full path to the results dir for merged bam files from tophat
+# and a mandate file that lists all of the sample names
+# and a full path to a directory where the results will be placed 
+#
+# set these parameters
+INPUT_DIR="/project-directory/results_merge"
+SAMPLE_NAMES="/project-directory/mandate/sample_names"
+OUTPUT_DIR="/project-directory/results_htseq"
+GTF="/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92.gtf"
+
+###
+# no changes required beyond this point
+###
+
+#activate the numpy_python virtual environment required for htseq 
+. ~/numpy_python/bin/activate 
+
+# job setup
+##$ -m bes
+#$ -M i.donaldson@qmul.ac.uk
+#$ -cwd
+#$ -V    
+##$ -pe smp 4
+#$ -l h_rt=24:0:0
+#$ -l h_vmem=16G   
+#$ -N htseq_count
+
+#retrieve the variables for the job from the mandate file
+THIS_SAMPLE=$(sed -n -e "$SGE_TASK_ID p" ${SAMPLE_NAMES})
+INPUT_FILE=${INPUT_DIR}/${THIS_SAMPLE}.bam
+if [ ! -e ${INPUT_FILE} ]; then
+    echo "${INPUT_FILE} not found for htseq. quitting";
+    exit;
+fi
+
+#all htseq output files will be written to a single sub-directory for each sample
+if [ ! -e ${OUTPUT_DIR}/${THIS_SAMPLE} ]; then mkdir -p ${OUTPUT_DIR}/${THIS_SAMPLE}; fi
+
+#log what will be done for this specfic task
+echo -e "starting htseq-count for ${THIS_SAMPLE}. \
+Number of jobs is ${NUM_JOBS} and task id is ${SGE_TASK_ID}" | tee -a ${OUTPUT_DIR}/htseq.log
+
+
+#do it
+htseq-count 	--format bam \
+                --order pos \
+                --mode intersection-strict \
+                --stranded no \
+                --minaqual 20 \
+                --type exon \
+                --idattr gene_id \
+                ${INPUT_FILE} \
+                ${GTF} > \
+                ${OUTPUT_DIR}/${THIS_SAMPLE}/gene_read_counts_table.tsv
+
+
+#log what happened
+echo "htseq-count exited with code $? for ${THIS_SAMPLE}" | tee -a ${OUTPUT_DIR}/htseq.log
+
+exit
+
+####
+
