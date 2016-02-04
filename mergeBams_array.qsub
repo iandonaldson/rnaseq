@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# mergeBams_array.qsub
+# array run implementation to merge all bam files for each of several samples 
+
+# usage
+# review and edit the parameters below then
+# qsub -o logs -e logs -t 1-95 mergeBams_array.qsub
+# where
+# logs - is an exsting directory where output and error logs from each job will be posted
+# -t is the number of tasks (number of samples whose bam files should be merged)
+#
+# below, specify a full path to the results dir for tophat, this will contain multiple sub-directories
+# and a mandate file that lists all of the sample names
+# and a full path to a directory where the results will be placed 
+# author: Ian Donaldson - i.donaldson@qmul.ac.uk
+
+# set these parameters
+PROJECT_DIR=/data/home/wgw057/projects/Bailey
+RESULTS_DIR=${PROJECT_DIR}/results_tophat
+SAMPLE_NAMES=${PROJECT_DIR}/mandate/sample_names
+OUTPUT_DIR=${PROJECT_DIR}/results_merge
+
+
+###
+# no changes required beyond this point
+###
+
+
+# number of jobs?
+NUM_JOBS=$(wc -l < ${SAMPLE_NAMES})
+
+# job setup
+##$ -m bes
+#$ -M <your@email>
+#$ -cwd
+#$ -V    
+#$ -l h_rt=24:0:0
+#$ -l h_vmem=2G  
+#$ -N merge
+
+module load tophat
+module load bowtie2/2.0.0.beta6
+module load  samtools/0.1.18
+
+#retrieve the variables for the job from the mandate file
+THIS_SAMPLE=$(sed -n -e "$SGE_TASK_ID p" ${SAMPLE_NAMES})
+FILES_FOR_MERGING=$(ls ${RESULTS_DIR}/${THIS_SAMPLE}_L00*/accepted_hits.bam)
+if [ ${FILES_FOR_MERGING} == "" ]; then
+    echo "no files were found for merging for sample ${THIS_SAMPLE}. quitting";
+    exit;
+fi
+
+#all merged files will be written to a single directory
+if [ ! -e ${OUTPUT_DIR} ]; then mkdir ${OUTPUT_DIR}; fi
+
+#log what will be done for this specfic task
+echo -e "starting samtools merge for ${THIS_SAMPLE} with files ${FILES_FOR_MERGING} \n\
+Number of jobs is ${NUM_JOBS} and task id is ${SGE_TASK_ID}" | tee -a ${OUTPUT_DIR}/merge.log
+
+#do the merge
+samtools merge ${OUTPUT_DIR}/${THIS_SAMPLE}.bam ${FILES_FOR_MERGING}
+
+#log what happened
+echo "samtools merge exited with code $? for ${THIS_SAMPLE}" | tee -a ${OUTPUT_DIR}/merge.log
+
+
+exit
