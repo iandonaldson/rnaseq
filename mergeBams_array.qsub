@@ -16,9 +16,10 @@
 # author: Ian Donaldson - i.donaldson@qmul.ac.uk
 
 # set these parameters
-RESULTS_DIR="/path-to-alignment-results/results_tophat"
-SAMPLE_NAMES="/path-to-sample-names/mandate/sample_names"
-OUTPUT_DIR="/path-to-results-dir/results_merge"
+PROJECT_DIR=/data/home/wgw057/projects/Bailey
+RESULTS_DIR=${PROJECT_DIR}/results_tophat
+SAMPLE_NAMES=${PROJECT_DIR}/mandate/sample_names
+OUTPUT_DIR=${PROJECT_DIR}/results_merge
 
 
 ###
