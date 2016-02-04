@@ -77,16 +77,27 @@ opar <- par()
 sessionInfo()
 
 
+#set up directory structure to receive results
+setwd(".")
+system('mkdir tables')
+system('mkdir figures')
+
 ```
 
 ### Loading and examining starting data
 
-From the mapped reads and the GTF files, we counted reads for each gene using htseq-count (http://www-huber. embl.de/users/anders/HTSeq/). The read count table is available in the accompanying sub-directory as a tab-delimited file: ```data/consolidated_raw_counts_final```
+From the mapped reads and the GTF files, we counted reads for each gene using htseq-count (http://www-huber. embl.de/users/anders/HTSeq/). The read count table is available in the accompanying sub-directory as a tab-delimited file: ```data/consolidated_raw_counts_final```.  
+
+A second table called ```data/read_info``` is also read.  These data describe the mapped and unmapped reads for each alignment for each sample.  Since samples may be spread over multiple lanes, the counts are first consolidated by sample name.  
 
 
 ```{r load_data, echo=TRUE, cache=TRUE}
-inputTable <- "data/consolidated_raw_counts_final"
-dataRawCounts <- read.table(inputTable, header=TRUE, sep="\t", row.names = 1, quote="", 
+inputFile <- "data/consolidated_raw_counts_final"
+dataRawCounts <- read.table(inputFile, header=TRUE, sep="\t", row.names = 1, quote="", 
+stringsAsFactors = FALSE)
+
+readInfoFile <- "data/read_info"
+readInfoRaw<-read.table(readInfoFile, header=FALSE, sep="\t", quote="", 
 stringsAsFactors = FALSE)
 ```
 
