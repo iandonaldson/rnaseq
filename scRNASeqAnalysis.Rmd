@@ -55,6 +55,13 @@ biocLite("org.At.tair.db")
 #  https://cran.r-project.org/web/packages/statmod/index.html
 install.packages("statmod")
 
+## gridExtra
+# https://cran.r-project.org/web/packages/gridExtra/index.html
+install.packages("gridExtra")
+
+
+
+
 ```
 ### Setup environment
 
@@ -67,6 +74,7 @@ library( genefilter )
 library( EBImage )
 library( statmod )
 library( topGO )
+library(gridExtra)
 
 #save graphical parameters
 opar <- par()
@@ -90,8 +98,10 @@ From the mapped reads and the GTF files, we counted reads for each gene using ht
 
 A second table called ```data/read_info``` is also read.  These data describe the mapped and unmapped reads for each alignment for each sample.  Since samples may be spread over multiple lanes, the counts are first consolidated by sample name.  
 
+The code below processes and prints the read_info data as a table and as a figure.
 
-```{r load_data, echo=TRUE, cache=TRUE}
+
+```{r load_data, echo=TRUE, cache=TRUE, fig.width=6}
 inputFile <- "data/consolidated_raw_counts_final"
 dataRawCounts <- read.table(inputFile, header=TRUE, sep="\t", row.names = 1, quote="", 
 stringsAsFactors = FALSE)
@@ -99,6 +109,26 @@ stringsAsFactors = FALSE)
 readInfoFile <- "data/read_info"
 readInfoRaw<-read.table(readInfoFile, header=FALSE, sep="\t", quote="", 
 stringsAsFactors = FALSE)
+# aggregate counts from multiple lanes for each sample
+readInfo<-aggregate(readInfoRaw[,c(3:4)], by=list(readInfoRaw[,2]), FUN="sum")
+colnames(readInfo) <- c("sample", "mapped_reads", "unmapped_reads")
+readTotals<-readInfo[,2] + readInfo[,3]
+mappedPercent <- round(readInfo[,2]/readTotals*100, 1)
+unMappedPercent <- round(readInfo[,3]/readTotals*100, 1)
+readInfo.df<-cbind(readInfo, readTotals, mappedPercent, unMappedPercent)
+
+#show the read info table 
+require(gridExtra)
+#https://gist.github.com/yihui/2790922 - to clean this up
+grid.table(readInfo.df)
+
+#visualize read data
+plot(readInfo.df$mapped_reads/1e6, unMappedPercent, 
+     main="Unmapped reads versus total reads",
+     xlab="Number of mapped reads (millions)",
+     ylab="Unmapped reads (%)",
+     ylim=c(0,100) )
+    
 ```
 
 ### A quick look at the raw data
