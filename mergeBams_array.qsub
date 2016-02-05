@@ -26,7 +26,6 @@ OUTPUT_DIR=${PROJECT_DIR}/results_merge
 # no changes required beyond this point
 ###
 
-
 # number of jobs?
 NUM_JOBS=$(wc -l < ${SAMPLE_NAMES})
 
@@ -46,7 +45,7 @@ module load  samtools/0.1.18
 #retrieve the variables for the job from the mandate file
 THIS_SAMPLE=$(sed -n -e "$SGE_TASK_ID p" ${SAMPLE_NAMES})
 FILES_FOR_MERGING=$(ls ${RESULTS_DIR}/${THIS_SAMPLE}_L00*/accepted_hits.bam)
-if [ ${FILES_FOR_MERGING} == "" ]; then
+if [ "${FILES_FOR_MERGING}" == "" ]; then
     echo "no files were found for merging for sample ${THIS_SAMPLE}. quitting";
     exit;
 fi
