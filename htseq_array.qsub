@@ -7,8 +7,9 @@
 # author: Ian Donaldson - i.donaldson@qmul.ac.uk
 #
 # usage
-# qsub -o logs -e logs -t 1-95 htseq_array.qsub
+# qsub -o logs -e logs -t 1-N htseq_array.qsub
 # where
+# N is th number of sample names
 # -o and -e specify paths to an exsting directory where output and error logs from each job will be posted
 # -t is the number of tasks (number of samples whose bam files should be merged)
 #
@@ -17,10 +18,12 @@
 # and a full path to a directory where the results will be placed 
 #
 # set these parameters
-INPUT_DIR="/project-directory/results_merge"
-SAMPLE_NAMES="/project-directory/mandate/sample_names"
-OUTPUT_DIR="/project-directory/results_htseq"
-GTF="/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92.gtf"
+PROJECT_DIR=/data/home/wgw057/projects/Bailey
+INPUT_DIR=${PROJECT_DIR}/results_merge
+SAMPLE_NAMES=${PROJECT_DIR}/mandate/sample_names
+OUTPUT_DIR=${PROJECT_DIR}/results_htseq
+GTF=/data/WHRI-GenomeCentre/data/ref/susScr3/GTF/susScr3_ERCC92.gtf
+
 
 ###
 # no changes required beyond this point
