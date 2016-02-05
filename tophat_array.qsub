@@ -19,15 +19,16 @@
 # -t (number of tasks) could also be passed in the script below
 
 #set these parameters
-MANDATE_FILE="/path-to-mandate-file/mandate/mandate"
-SAMPLES_DIR="/path-to-data-dir-with-fastq.gz-files/data"
-OUTPUT_DIR="/path-to-results-dir/results_tophat"
+PROJECT_DIR=/data/home/wgw057/projects/Bailey
+MANDATE_FILE=${PROJECT_DIR}/mandate/mandate
+SAMPLES_DIR=${PROJECT_DIR}/data
+OUTPUT_DIR=${PROJECT_DIR}/results_tophat
 GTF=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92.gtf
 TRS_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92_TRX
 GENOME_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92
 
 ###
-# no changes required beyond this point (except email)
+# no changes required beyond this point
 ###
 
 
