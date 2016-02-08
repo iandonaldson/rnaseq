@@ -12,9 +12,10 @@
 # ./consolidate_htseq_results.sh
 #
 # set these parameters
-INPUT_DIR="/project-directory/results_htseq"
-SAMPLE_NAMES="/project-directory/mandate/sample_names"
-OUTPUT_DIR="/project-directory/results_htseq_consolidated"
+PROJECT_DIR=/data/home/wgw057/projects/Bailey
+INPUT_DIR=${PROJECT_DIR}/results_htseq
+SAMPLE_NAMES=${PROJECT_DIR}/mandate/sample_names
+OUTPUT_DIR=${PROJECT_DIR}/results_htseq_consolidated
 
 if [ ! -e ${OUTPUT_DIR} ]; then mkdir ${OUTPUT_DIR}; fi
 
