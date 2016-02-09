@@ -46,9 +46,11 @@ biocLite("EBImage")
 #  https://bioconductor.org/packages/release/bioc/html/topGO.html
 biocLite("topGO")
 
-## org.At.tair.db
-#  https://bioconductor.org/packages/release/data/annotation/html/org.At.tair.db.html
-biocLite("org.At.tair.db")
+## org.Hs.eg.db or similar depending on your organism of interest
+#  https://bioconductor.org/packages/release/data/annotation/html/org.Hs.eg.db.html
+biocLite("org.Hs.eg.db")
+biocLite("GenomeInfoDb")
+
 
 ### from CRAN
 ## statmod
@@ -101,7 +103,7 @@ A second table called ```data/read_info``` is also read.  These data describe th
 The code below processes and prints the read_info data as a table and as a figure.
 
 
-```{r load_data, echo=TRUE, cache=TRUE, fig.width=6}
+```{r load_data, echo=TRUE, cache=TRUE}
 inputFile <- "data/consolidated_raw_counts_final"
 dataRawCounts <- read.table(inputFile, header=TRUE, sep="\t", row.names = 1, quote="", 
 stringsAsFactors = FALSE)
@@ -121,6 +123,8 @@ readInfo.df<-cbind(readInfo, readTotals, mappedPercent, unMappedPercent)
 require(gridExtra)
 #https://gist.github.com/yihui/2790922 - to clean this up
 grid.table(readInfo.df)
+readInfo.df
+
 
 #visualize read data
 plot(readInfo.df$mapped_reads/1e6, unMappedPercent, 
@@ -147,7 +151,7 @@ Number of zero counts are: `r sum(dataRawCounts == 0)`.
 
 Number of non-zero counts are: `r sum(dataRawCounts != 0)`.
 
-Percentage of non-zero counts are: `r sum(dataRawCounts != 0)/sum(dataRawCounts == 0) * 100`.
+Percentage of non-zero counts are: `r sum(dataRawCounts != 0)/(sum(dataRawCounts != 0) + sum(dataRawCounts == 0)) * 100`.
 
 The number of duplicated row-names is: `r sum(duplicated(rownames(dataRawCounts)))`.
 
@@ -666,10 +670,13 @@ project23 <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,2:3]
 project13 <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,c(1,3)]
 
 # set up for labelling
+isChip2<-0
+isCluster1<-0
+#this needs to be generalized
 #Chip2/3
-isChip2 <- substr( rownames(project), 1, 5 ) == "Chip2"
+#isChip2 <- substr( rownames(project), 1, 5 ) == "Chip2"
 #cluster 1/2
-isCluster1 <- project[,1] < 1
+#isCluster1 <- project[,1] < 1
 
 
 #plot the first three pairwise projections
