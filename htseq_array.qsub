@@ -33,7 +33,7 @@ GTF=/data/WHRI-GenomeCentre/data/ref/susScr3/GTF/susScr3_ERCC92.gtf
 . ~/numpy_python/bin/activate 
 
 # job setup
-##$ -m bes
+#$ -m bes
 #$ -M i.donaldson@qmul.ac.uk
 #$ -cwd
 #$ -V    
