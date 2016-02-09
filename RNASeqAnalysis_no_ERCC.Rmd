@@ -1,0 +1,465 @@
+---
+title: "RNASeqAnalysis_no_ERCC"
+author: "Ian Donaldson"
+date: "09/02/2016"
+output: html_document
+---
+
+
+### About this analysis
+
+This protocol is a basic visualization of RNASeq data.  Starting data is expected in a directory called data which contains two files  
+1 - consolidated_raw_counts_final  
+2 - read_info
+
+Normaliztion uses a size-factor approach from DeSeq.  This analysis does not include the use of an ERCC spike-in control and is intended to be used for data that does not have a spike-in control or to take a first look at any RNASeq data set.
+
+
+```{r install_packages, echo=FALSE, eval=FALSE, cache=TRUE}
+#this code only needs to be run if you are setting up the development environment for the first time
+#it may be necessary to run this code as root depending on your set up
+#and it may be necessary to install or update several linux libs on your system
+#besides libraries required for R installation (https://cran.r-project.org/doc/manuals/r-release/R-admin.html#Essential-programs-and-libraries)
+#you must also install the R packages knitr, yaml, htmltools, caTools, bitops and rmarkdown in order to create html documents from this .Rmd file 
+
+### from bioconductor
+source("http://bioconductor.org/biocLite.R")
+
+## DESeq - note, a DESeq2 is available
+# https://bioconductor.org/packages/release/bioc/html/DESeq.html
+biocLite("DESeq")
+#browseVignettes("DESeq")
+
+
+## genefilter
+#  https://bioconductor.org/packages/release/bioc/html/genefilter.html
+biocLite("genefilter") 
+
+## EBImage
+#  https://bioconductor.org/packages/release/bioc/html/EBImage.html
+# requires sudo yum install fftw-devel
+biocLite("EBImage")
+#browseVignettes("EBImage")
+
+## TopGO
+#  https://bioconductor.org/packages/release/bioc/html/topGO.html
+biocLite("topGO")
+
+## org.Hs.eg.db or similar depending on your organism of interest
+#  https://bioconductor.org/packages/release/data/annotation/html/org.Hs.eg.db.html
+biocLite("org.Hs.eg.db")
+biocLite("GenomeInfoDb")
+
+
+### from CRAN
+## statmod
+#  https://cran.r-project.org/web/packages/statmod/index.html
+install.packages("statmod")
+
+## gridExtra
+# https://cran.r-project.org/web/packages/gridExtra/index.html
+install.packages("gridExtra")
+
+
+
+
+```
+### Setup environment
+
+The following packages are used throughout this analysis.
+
+```{r setup_environment, echo=TRUE, results='hide', cache=TRUE}
+
+library( DESeq )
+library( genefilter )
+library( EBImage )
+library( statmod )
+library(gridExtra)
+
+#save graphical parameters
+opar <- par()
+#and restore with
+#par(opar)
+#opar
+
+sessionInfo()
+
+#set up directory structure to receive results
+setwd(".")
+system('if [ ! -e tables  ]; then mkdir tables;  fi')
+system('if [ ! -e figures ]; then mkdir figures; fi')
+
+```
+
+### Loading and examining starting data
+
+From the mapped reads and the GTF files, we counted reads for each gene using htseq-count (http://www-huber. embl.de/users/anders/HTSeq/). The read count table is available in the accompanying sub-directory as a tab-delimited file: ```data/consolidated_raw_counts_final```.  
+
+A second table called ```data/read_info``` is also read.  These data describe the mapped and unmapped reads for each alignment for each sample.  Since samples may be spread over multiple lanes, the counts are first consolidated by sample name.  
+
+The code below processes and prints the read_info data as a table and as a figure.
+
+
+```{r load_data, echo=TRUE, cache=TRUE}
+inputFile <- "data/consolidated_raw_counts_final"
+dataRawCounts <- read.table(inputFile, header=TRUE, sep="\t", row.names = 1, quote="", 
+stringsAsFactors = FALSE)
+
+readInfoFile <- "data/read_info"
+readInfoRaw<-read.table(readInfoFile, header=FALSE, sep="\t", quote="", 
+stringsAsFactors = FALSE)
+# aggregate counts from multiple lanes for each sample
+readInfo<-aggregate(readInfoRaw[,c(3:4)], by=list(readInfoRaw[,2]), FUN="sum")
+colnames(readInfo) <- c("sample", "mapped_reads", "unmapped_reads")
+readTotals<-readInfo[,2] + readInfo[,3]
+mappedPercent <- round(readInfo[,2]/readTotals*100, 1)
+unMappedPercent <- round(readInfo[,3]/readTotals*100, 1)
+readInfo.df<-cbind(readInfo, readTotals, mappedPercent, unMappedPercent)
+
+#show the read info table 
+require(gridExtra)
+#https://gist.github.com/yihui/2790922 - to clean this up
+grid.table(readInfo.df)
+readInfo.df
+
+
+#visualize read data
+plot(readInfo.df$mapped_reads/1e6, unMappedPercent, 
+     main="Unmapped reads versus total reads",
+     xlab="Number of mapped reads (millions)",
+     ylab="Unmapped reads (%)",
+     ylim=c(0,100) )
+    
+```
+
+### A quick look at the raw data
+
+The dimensions of the raw data table are: `r dim(dataRawCounts)`.
+
+The first 10 rows and 5 columns look like this:
+
+```{r peek1, echo=FALSE, cache=TRUE}
+
+dataRawCounts[1:10,1:5]
+
+```
+
+Number of zero counts are: `r sum(dataRawCounts == 0)`.
+
+Number of non-zero counts are: `r sum(dataRawCounts != 0)`.
+
+Percentage of non-zero counts are: `r sum(dataRawCounts != 0)/(sum(dataRawCounts != 0) + sum(dataRawCounts == 0)) * 100`.
+
+The number of duplicated row-names is: `r sum(duplicated(rownames(dataRawCounts)))`.
+
+The number of missing (NA) data is: `r sum(is.na(dataRawCounts))`.
+
+```{r raw_data_check, echo=FALSE, eval=FALSE, cache=TRUE}
+
+#quick examination
+dataRawCounts[ 1:10, 1:5 ]
+head(colnames(dataRawCounts))
+head(rownames(dataRawCounts))
+sum(duplicated(rownames(dataRawCounts)))
+sum(is.na(dataRawCounts))
+sum(dataRawCounts == 0)
+sum(dataRawCounts != 0)
+sum(dataRawCounts != 0)/sum(dataRawCounts == 0)
+#str(dataRawCounts)
+dim(dataRawCounts)
+
+```
+
+### Separation of counts from the experimental organism and the ERCC spike-in control.
+
+The raw counts data is split into two sub-tables, one with the ERCC spikes, (countsERCC) and one with the organism genes (countsOrgGenes). If this analysis workflow is being used, it is likely that there are no counts from ERCC spike-ins.
+
+
+```{r split_data, echo=TRUE, eval=TRUE, cache=TRUE}
+
+isSpikeIn <- substr( rownames(dataRawCounts), 1, 5 ) == "ERCC-"
+geneTypes <- factor(isSpikeIn, labels=c("OrgGene", "ERCC"))
+
+countsERCC <- dataRawCounts[ isSpikeIn, ]
+countsOrgGenes <- dataRawCounts[ !isSpikeIn, ]
+
+```
+
+The dimensions of the countsOrgGenes table are: `r dim(countsOrgGenes)`.
+
+The dimensions of the countsERCC table are: `r dim(countsERCC)`.
+
+The first few rows of countsERCC look like this:
+```{r peek_ERCC, echo=FALSE, eval=TRUE, cache=TRUE}
+countsERCC[1:10, 1:5]
+```
+
+### Calculate Size factors
+
+Size factors are calculated for the organism gene counts.
+
+```{r size_factors, echo=TRUE, eval=TRUE, cache=TRUE}
+require(DESeq)
+sfOrgGenes <- estimateSizeFactorsForMatrix( countsOrgGenes )
+sfOrgGenes[1:14]
+```
+
+### EDA of size factors
+
+This section examines size factors and expression data to identify samples that could be excluded from further analysis.  All samples are included in this workflow - if samples are identified that could be excluded, they will be excluded in a separate analysis from this one.  
+
+```{r eda, echo=TRUE, eval=TRUE, cache=TRUE}
+#take a peek and identify possible outliers
+summary(sfOrgGenes)
+boxplot(sfOrgGenes)
+
+
+#Are there any size factors that are possible outliers - more than 3 sd from mean
+ll<-mean(sfOrgGenes) - 3*sd(sfOrgGenes)
+ul<-mean(sfOrgGenes) + 3*sd(sfOrgGenes)
+
+plot(sfOrgGenes)
+abline(h=ll, col="blue")
+abline(h=ul, col="red")
+
+# collect info about possible outliers - high
+if (length(which(sfOrgGenes > ul)) > 0 ) { 
+  print(sf[,c(sfOrgGenes > ul)]); cat("****\n\n")
+  print(which(sfOrgGenes > ul)); cat("****\n\n")
+  print(summary(log10(countsOrgGenes[,which(sfOrgGenes > ul)]+1))); cat("****\n\n")
+  boxplot(log10(countsOrgGenes[,which(sfOrgGenes > ul)]+1))
+}
+
+# collect info about possible outliers - low
+if (length(which(sfOrgGenes < ll)) > 0 ) { 
+  print(sf[,c(sfOrgGenes < ll)]); cat("****\n\n")
+  print(which(sfOrgGenes < ll)); cat("****\n\n")
+  print(summary(log10(countsOrgGenes[,which(sfOrgGenes < ll)]+1))); cat("****\n\n")
+  boxplot(log10(countsOrgGenes[,which(sfOrgGenes < ll)]+1))
+}
+
+```
+
+### EDA of zero counts, non-zero counts, sample means, non-zero-sample-means, etc.
+
+This section needs to be cleaned up
+
+```{r eda_2, echo=FALSE, eval=FALSE, cache=TRUE}
+#look further for differences in these samples from number of zero counts and means of all others
+#how many genes have zero counts in each sample 
+sampleNumZeros<-apply(countsOrgGenes, 2, function(x) sum(x==0))
+summary(sampleNumZeros)
+hist(sampleNumZeros)
+boxplot(sampleNumZeros)
+sd(sampleNumZeros)
+x<-rnorm(n=length(sampleNumZeros), mean=mean(sampleNumZeros), sd=sd(sampleNumZeros))
+qqplot(x,sampleNumZeros)
+abline(0,1, col="black")
+abline(h=mean(sampleNumZeros))
+
+
+
+#look at dist of non-zero counts 
+sampleNonZeros<-apply(countsOrgGenes, 2, function(x) sum(x!=0))
+summary(sampleNonZeros)
+hist(sampleNonZeros)
+boxplot(sampleNonZeros)
+plot(sampleNonZeros) 
+plot(log2(sampleNonZeros))
+
+# to do - redo as a box plot with points overlaid - jiggle
+plot(sampleNonZeros[order(sampleNonZeros)], main="number of genes with non-zero counts in each sample") 
+abline(h=mean(sampleNonZeros))
+
+plot(log2(sampleNonZeros[order(sampleNonZeros)]))
+abline(h=log2(mean(sampleNonZeros)))
+
+sd(sampleNonZeros)
+
+xx<-rnorm(n=length(sampleNonZeros), mean=mean(sampleNonZeros), sd=sd(sampleNonZeros))
+qqplot(xx,sampleNonZeros)
+abline(0,1, col="black")
+abline(h=mean(sampleNonZeros)) #<== show this
+mean(sampleNonZeros)
+
+#take a look at distribution of sample means
+sampleMeans<-apply(countsOrgGenes, 2, function(x) mean(x))
+summary(sampleMeans)
+hist(sampleMeans)
+boxplot(sampleMeans)
+sd(sampleMeans)
+x<-rnorm(n=length(sampleMeans), mean=mean(sampleMeans), sd=sd(sampleMeans))
+qqplot(x,sampleMeans)
+abline(0,1)
+ul=(mean(sampleMeans) + 3*sd(sampleMeans))
+ll=(mean(sampleMeans) - 3*sd(sampleMeans))
+abline(h=mean(sampleMeans), col="black")
+
+abline(h=ul)
+abline(h=ll)
+
+
+##### new
+
+#take a look at distribution of non-zero sample means
+sampleMeans<-apply(countsOrgGenes, 2, function(x) mean(x[x!=0]))
+summary(sampleMeans)
+hist(sampleMeans)
+boxplot(sampleMeans)
+sd(sampleMeans)
+x<-rnorm(n=length(sampleMeans), mean=mean(sampleMeans), sd=sd(sampleMeans))
+qqplot(x,sampleMeans)
+abline(0,1)
+ul=(mean(sampleMeans) + 3*sd(sampleMeans))
+ll=(mean(sampleMeans) - 3*sd(sampleMeans))
+abline(h=mean(sampleMeans), col="black")
+abline(h=ul, col="green")
+abline(h=ll, col="red")
+
+
+#just plot the nonzero sample means
+plot(sampleMeans[order(sampleMeans)])
+ul=(mean(sampleMeans) + 3*sd(sampleMeans))
+ll=(mean(sampleMeans) - 3*sd(sampleMeans))
+abline(h=mean(sampleMeans), col="black")
+abline(h=ul, col="green")
+abline(h=ll, col="red")
+
+#plot sample means versus number of non-zero genes in each sample
+
+plot(sampleNonZeros, sampleMeans, xlab="number of non-zero genes in sample", ylab="mean of non-zero counts in sample", main="mean-non-zero counts versus non-zero genes") #<== show this
+
+
+##################
+# this is probably the most informative summary figure
+##################
+
+
+
+
+
+
+
+```
+
+
+
+The above shows examination of number of zeros and means in each sample, and looks for obvious outliers (using ESD method - +/- 3 sd from mean).
+
+Next, I will look for structure in the data (different groups of related samples) using hclust and PCA.
+
+### EDA of sample data: hierarchical clustering
+
+hclust of samples - looking for unexpected structure in samples - skipped
+
+pca of raw data - skipped
+
+
+
+### Normalize count data by the size factors.
+
+```{r normalize_counts, echo=TRUE, eval=TRUE, cache=TRUE}
+
+nCountsOrgGenes <- t( t(countsOrgGenes) / sfOrgGenes )
+
+```
+
+### Then calculate the sample moments
+
+```{r sample_moments, echo=TRUE, eval=TRUE, cache=TRUE}
+
+meansOrgGenes <- rowMeans( nCountsOrgGenes )
+varsOrgGenes <- rowVars( nCountsOrgGenes )
+cv2OrgGenes <- varsOrgGenes / meansOrgGenes^2
+
+```
+
+
+### PCA of normalized counts
+
+The first figure shows a scree plot of the principle components from a PCA of normalized counts for all genes.  This is followed by three plots showing the projections of the samples onto the pairwise combinations of the first three PC's.  Finally, the gene-weightings for the first three PCs are shown.  
+
+```{r pca_of_ncounts, echo=TRUE, eval=TRUE, cache=TRUE}
+
+nCountsOrgGenesLogged <- log10(nCountsOrgGenes+1)
+princ <- prcomp(t(nCountsOrgGenesLogged))
+
+#look at the scree plot - first component covers greatest proportion of variance
+plot(princ, main="scree plot for PCs - normalized counts")
+
+#make the first three pairwise projections
+nComp <- 2
+project <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,1:nComp]
+project23 <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,2:3]
+project13 <- predict(princ, newdata=t(nCountsOrgGenesLogged))[,c(1,3)]
+
+
+#plot the first three pairwise projections
+plot(project, main="PC1 versus PC2 - normalized counts")
+text(project, labels=row.names(project), pos=2, col="red", cex=0.5)
+abline(h=0); abline(v=0)
+
+plot(project23, main="PC2 versus PC3 - normalized counts")
+text(project23, labels=row.names(project23), pos=2, col="red", cex=0.5)
+abline(h=0); abline(v=0)
+
+plot(project13,  main="PC1 versus PC3 - normalized counts")
+text(project13, labels=row.names(project13), pos=2, col="red", cex=0.5)
+abline(h=0); abline(v=0)
+
+
+#look at the first principle component
+thisorder<-order(abs(princ$rotation[,1]), decreasing=TRUE)
+component_1<-princ$rotation[thisorder,1]
+component_1[1:40]
+plot(abs(component_1[1:40]), xaxt="n", xlab="Gene", ylab="abs(weighting)", main="PC1 weightings") 
+axis(1, at=1:40, labels=names(component_1)[1:40], las=2, cex.axis=0.5)
+
+
+#look at the second principle component
+thisorder<-order(abs(princ$rotation[,2]),decreasing=TRUE)
+component_2<-princ$rotation[thisorder,2]
+component_2[1:40]
+plot(abs(component_2[1:40]), xaxt="n", xlab="Gene", ylab="abs(weighting)", main="PC2 weightings")
+axis(1, at=1:40, labels=names(component_2)[1:40], las=2, cex.axis=0.5)
+
+#look at the third principle component
+thisorder<-order(abs(princ$rotation[,3]),decreasing=TRUE)
+component_3<-princ$rotation[thisorder,3]
+component_3[1:40]
+plot(abs(component_3[1:40]), xaxt="n", xlab="Gene", ylab="abs(weighting)", main="PC3 weightings")
+axis(1, at=1:40, labels=names(component_2)[1:40], las=2, cex.axis=0.5)
+
+```
+
+
+
+
+
+
+TODO
+for this script
+-include EDA of starting data - examine means, number of non-zero counts etc.
+-show heatmaps before and after
+-show PCA before normalization
+
+
+-plot for each sample, seq depth (number of reads versus number of genes detected)
+-try doing normalization using RUV package - normalizes against house-keeping genes
+-find genes that have reliable counts but no variation
+-show graphs of counts for means of gene-counts for one set of samples versus another
+
+-reread DeSeq package and compare to DeSeq2
+-look at hr package for rnaseq analysis
+
+-look at github page for Martin Hernberg - they will have best practices -also SC3 cluster package
+-look at EdgeR package
+-look at Scater package
+-look at Alekandra Kolodziejczyk paper (Teichman group)
+-cluster (PCA) using pluripotency and differentiation markers, G2M markers (cyclebase.org), MSigDb, Reactome
+
+-see FactorialLVM (lent variable modelling) a la Oliver Stegle 
+
+other
+work on protocol to identify points on a graph
+
