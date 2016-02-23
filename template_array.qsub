@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# app_array.qsub
+#
+# array run version of some app
+# see http://
+# author: Ian Donaldson - i.donaldson@qmul.ac.uk
+#
+# usage
+# qsub -o logs -e logs -t 1-N app_array.qsub
+# where
+# N is th number of sample names
+# -o and -e specify paths to an exsting directory where output and error logs from each job will be posted
+# -t is the number of tasks (number of samples whose bam files should be merged)
+#
+# set these parameters
+PROJECT_DIR=
+INPUT_DIR=${PROJECT_DIR}/xxx
+SAMPLE_NAMES=${PROJECT_DIR}/mandate/sample_names
+OUTPUT_DIR=${PROJECT_DIR}/results_xxx
+
+
+
+###
+# no changes required beyond this point
+###
+
+
+
+# job setup
+#$ -m bes
+#$ -M i.donaldson@qmul.ac.uk
+#$ -cwd
+#$ -V    
+##$ -pe smp 4
+#$ -l h_rt=24:0:0
+#$ -l h_vmem=16G   
+#$ -N htseq_count
+
+#retrieve the variables for the job from the mandate file
+THIS_SAMPLE=$(sed -n -e "$SGE_TASK_ID p" ${SAMPLE_NAMES})
+INPUT_FILE=${INPUT_DIR}/${THIS_SAMPLE}.bam
+if [ ! -e ${INPUT_FILE} ]; then
+    echo "${INPUT_FILE} not found for htseq. quitting";
+    exit;
+fi
+
+#all output files will be written to a single sub-directory for each sample
+if [ ! -e ${OUTPUT_DIR}/${THIS_SAMPLE} ]; then mkdir -p ${OUTPUT_DIR}/${THIS_SAMPLE}; fi
+
+#log what will be done for this specfic task
+echo -e "starting app for ${THIS_SAMPLE}. \
+Number of jobs is ${NUM_JOBS} and task id is ${SGE_TASK_ID}" | tee -a ${OUTPUT_DIR}/log
+
+
+#do it
+#app 	--param1 value \
+      --param2 value \
+      ${INPUT_FILE} > \
+      ${OUTPUT_DIR}/${THIS_SAMPLE}/gene_read_counts_table.tsv
+
+
+#log what happened
+echo "htseq-count exited with code $? for ${THIS_SAMPLE}" | tee -a ${OUTPUT_DIR}/log
+
+exit
+
+####
