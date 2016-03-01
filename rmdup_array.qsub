@@ -1,0 +1,82 @@
+#!/bin/bash
+
+# rmdup_array.qsub
+#
+# array run versionto remove duplicates from Bam files using samtools rmdup
+# and then creates a new index using samtools index
+# see http://www.htslib.org/doc/samtools.html
+# author: Ian Donaldson - i.donaldson@qmul.ac.uk
+#
+# usage
+# qsub -o logs -e logs -t 1-N rmdup_array.qsub
+# where
+# N is th number of sample names
+# -o and -e specify paths to an exsting directory where output and error logs from each job will be posted
+# -t is the number of tasks (number of samples whose bam files should be merged)
+#
+# set these parameters
+PROJECT_DIR=/data/WHRI-GenomeCentre/idonaldson/Sandeep
+INPUT_DIR=/data/home/wgw057/gc/shares/Projects/NGS_Projects/RNA_Sequencing/Rajan_Sandeep/GC-SSR-5141/Cufflinks_BAM/S.Rajan_mRNA-Seq_GC-SR-5141-27318298/All_BAM
+SAMPLE_NAMES=${PROJECT_DIR}/mandate/sample_names
+OUTPUT_DIR=${PROJECT_DIR}/results_dedup
+
+
+
+###
+# no changes required beyond this point
+###
+
+# number of jobs?
+NUM_JOBS=$(wc -l < ${SAMPLE_NAMES})
+
+# job setup
+#$ -m bes
+#$ -M i.donaldson@qmul.ac.uk
+#$ -cwd
+#$ -V    
+##$ -pe smp 4
+#$ -l h_rt=24:0:0
+#$ -l h_vmem=2G   
+#$ -N rmdup
+
+#retrieve the variables for the job from the mandate file
+THIS_SAMPLE=$(sed -n -e "$SGE_TASK_ID p" ${SAMPLE_NAMES})
+INPUT_FILE=${INPUT_DIR}/${THIS_SAMPLE}.bam
+if [ ! -e ${INPUT_FILE} ]; then
+    echo "${INPUT_FILE} not found for htseq. quitting";
+    exit;
+fi
+
+#all output files will be written to a single sub-directory
+if [ ! -e ${OUTPUT_DIR} ]; then mkdir -p ${OUTPUT_DIR}; fi
+
+#log what will be done for this specfic task
+echo -e "starting app for ${THIS_SAMPLE}. \
+Number of jobs is ${NUM_JOBS} and task id is ${SGE_TASK_ID}" | tee -a ${OUTPUT_DIR}/log
+
+# rmdup has not worked in samtools 1.x versions but
+# it has been announced that it will work in 1.3 
+# when it it released
+module load samtools/0.1.18
+
+#do it
+samtools rmdup \
+      ${INPUT_FILE} \
+      ${OUTPUT_DIR}/${THIS_SAMPLE}.rmdup.bam
+
+#log what happened and exit if rmdup was not successful
+RMDUP_EXIT=$?
+echo "samtools rmdup exited with code ${RMDUP_EXIT} for ${THIS_SAMPLE}" | tee -a ${OUTPUT_DIR}/log
+if [ ${RMDUP_EXIT} neq   ]; then exit; fi
+
+ 
+#make the new index
+samtools index ${OUTPUT_DIR}/${THIS_SAMPLE}.rmdup.bam ${OUTPUT_DIR}/${THIS_SAMPLE}.rmdup.bam.bai
+INDEX_EXIT=$?
+#log what happened
+echo "samtools index exited with code ${INDEX_EXIT} for ${THIS_SAMPLE}" | tee -a ${OUTPUT_DIR}/log
+
+
+exit
+
+####
