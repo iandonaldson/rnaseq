@@ -35,13 +35,13 @@ OUTPUT_DIR=${PROJECT_DIR}/results_xxx
 ##$ -pe smp 4
 #$ -l h_rt=24:0:0
 #$ -l h_vmem=16G   
-#$ -N htseq_count
+#$ -N APP_NAME
 
 #retrieve the variables for the job from the mandate file
 THIS_SAMPLE=$(sed -n -e "$SGE_TASK_ID p" ${SAMPLE_NAMES})
 INPUT_FILE=${INPUT_DIR}/${THIS_SAMPLE}.bam
 if [ ! -e ${INPUT_FILE} ]; then
-    echo "${INPUT_FILE} not found for htseq. quitting";
+    echo "${INPUT_FILE} not found. quitting";
     exit;
 fi
 
@@ -61,7 +61,7 @@ Number of jobs is ${NUM_JOBS} and task id is ${SGE_TASK_ID}" | tee -a ${OUTPUT_D
 
 
 #log what happened
-echo "htseq-count exited with code $? for ${THIS_SAMPLE}" | tee -a ${OUTPUT_DIR}/log
+echo "exited with code $? for ${THIS_SAMPLE}" | tee -a ${OUTPUT_DIR}/log
 
 exit
 
