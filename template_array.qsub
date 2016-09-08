@@ -34,7 +34,7 @@ OUTPUT_DIR=${PROJECT_DIR}/results_xxx
 #$ -V    
 ##$ -pe smp 4
 #$ -l h_rt=24:0:0
-#$ -l h_vmem=16G   
+#$ -l h_vmem=2G   
 #$ -N APP_NAME
 
 #retrieve the variables for the job from the mandate file
