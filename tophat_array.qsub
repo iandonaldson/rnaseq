@@ -11,21 +11,24 @@
 
 # usage
 # review input params and then
-# qsub -o logs -e logs -t 1-380 tophat_array.qsub
-# note you must manually specify (in the above command) the directory for the logs since it is not possible to set these after qsub has started
+# qsub -o logs -e logs -t 1-N tophat_array.qsub
+# where N is the number of tasks and logs is a pre-existing directory
 # -t 1:380 will carry out tasks (lines) 1 to 380 in mandate file
 # -t 234 will carry out only the task specified by line 234
 # -t 100-107 will carry out instructions on this range of lines
-# -t (number of tasks) could also be passed in the script below
 
 #set these parameters
-PROJECT_DIR=/data/home/wgw057/projects/Bailey
-MANDATE_FILE=${PROJECT_DIR}/mandate/mandate
-SAMPLES_DIR=${PROJECT_DIR}/data
-OUTPUT_DIR=${PROJECT_DIR}/results_tophat
-GTF=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92.gtf
-TRS_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92_TRX
-GENOME_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92
+PROJECT_DIR="/data/WHRI-GenomeCentre/shares/Projects/NGS_Projects/RNA_Sequencing/Connolly_Martin/GC-MC-5666/Analysis/ian_analysis"
+INPUT_DIR="/data/WHRI-GenomeCentre/shares/Projects/NGS_Projects/RNA_Sequencing/Connolly_Martin/GC-MC-5666/Data/GC-MC-5666"
+SAMPLE_NAMES=${PROJECT_DIR}/mandate/sample_names
+OUTPUT_DIR=${PROJECT_DIR}/results_tophat_fr.fs
+
+#tophat specific settings
+GTF=/data/WHRI-GenomeCentre/data/ref/hg19/bwt/hg19_ERCC92.gtf
+TRS_IDX=/data/WHRI-GenomeCentre/data/ref/hg19/bwt/hg19_ERCC92_TRX
+GENOME_IDX=/data/WHRI-GenomeCentre/data/ref/hg19/bwt/hg19_ERCC92
+
+
 
 ###
 # no changes required beyond this point
@@ -33,17 +36,16 @@ GENOME_IDX=/data/WHRI-GenomeCentre/data/ref/mm10/bwt/mm10_ERCC92
 
 
 # number of jobs?
-NUM_JOBS=$(wc -l < ${MANDATE_FILE})
+NUM_JOBS=$(wc -l < ${SAMPLE_NAMES})
 
-##$ -m bes
-#$ -M <your@email>
+#$ -m bes
+#$ -M i.donaldson@qmul.ac.uk
 #$ -cwd
 #$ -V    
 #$ -pe smp 4
 #$ -l h_rt=48:0:0
-#$ -l h_vmem=2G   
-##$ -t 1-3
-
+#$ -l h_vmem=4G   
+#$ -N tophat
 
 module load tophat
 module load bowtie2/2.0.0.beta6
@@ -55,33 +57,74 @@ module load  samtools/0.1.18
 ## see this post
 ## http://seqanswers.com/forums/showthread.php?t=24676
 
+#file names will be of the form
+#VJ-H4_S16_L001_R1_001.fastq.gz
+#VJ-H4_S16_L001_R2_001.fastq.gz
+#VJ-H4_S16_L002_R1_001.fastq.gz
+#VJ-H4_S16_L002_R2_001.fastq.gz
+#VJ-H4_S16_L003_R1_001.fastq.gz
+#VJ-H4_S16_L003_R2_001.fastq.gz
+#VJ-H4_S16_L004_R1_001.fastq.gz
+#VJ-H4_S16_L004_R2_001.fastq.gz
+
+#and sample_names will be of the form
+#VJ-H4_S16
+#retrieved to mandate/sample_names files using something like:
+#ls -1 *.gz | cut -d '_' -f 1,2 | sort | uniq > sample_names
+
 
 #retrieve the variables for the job from the mandate file
-THIS_LINE=$(sed -n -e "$SGE_TASK_ID p" ${MANDATE_FILE})
-read -d "\t" -a THIS_ARRAY <<< ${THIS_LINE}
-SAMPLE_NAME=${THIS_ARRAY[0]}
-READ_1=${THIS_ARRAY[1]}
-READ_2=${THIS_ARRAY[2]}
+THIS_SAMPLE=$(sed -n -e "$SGE_TASK_ID p" ${SAMPLE_NAMES})
+INPUT_FILES="${INPUT_DIR}/${THIS_SAMPLE}_L001_R1_001.fastq.gz,\
+${INPUT_DIR}/${THIS_SAMPLE}_L002_R1_001.fastq.gz,\
+${INPUT_DIR}/${THIS_SAMPLE}_L003_R1_001.fastq.gz,\
+${INPUT_DIR}/${THIS_SAMPLE}_L004_R1_001.fastq.gz \
+${INPUT_DIR}/${THIS_SAMPLE}_L001_R2_001.fastq.gz,\
+${INPUT_DIR}/${THIS_SAMPLE}_L002_R2_001.fastq.gz,\
+${INPUT_DIR}/${THIS_SAMPLE}_L003_R2_001.fastq.gz,\
+${INPUT_DIR}/${THIS_SAMPLE}_L004_R2_001.fastq.gz"
+
+
+#check files exist
+for THIS_FILE in $(echo ${INPUT_FILES} | tr ',' ' '); do
+   echo "checking ${THIS_FILE}";
+   if [ ! -e ${THIS_FILE} ]; then
+      echo "the file ${THIS_FILE} was not found. quitting";
+      exit;
+   fi
+done
+
 
 #each tophat result set will go into a subdirectory of the OUTPUT_DIR named after the sample
-#if [ ! -e ${OUTPUT_DIR} ]; then mkdir ${OUTPUT_DIR}; fi
-if [ ! -e ${OUTPUT_DIR}/${SAMPLE_NAME} ]; then mkdir -p ${OUTPUT_DIR}/${SAMPLE_NAME}; fi
+if [ ! -e ${OUTPUT_DIR}/${THIS_SAMPLE} ]; then mkdir -p ${OUTPUT_DIR}/${THIS_SAMPLE}; fi
 
 #log what will be done for this specfic task
-echo "starting tophat for ${SAMPLE_NAME} ${SAMPLES_DIR}/${READ_1} ${SAMPLES_DIR}/${READ_2}" >> ${OUTPUT_DIR}/start_tophat_qsubs.log
-echo "Number of jobs is ${NUM_JOBS} and task id is ${SGE_TASK_ID}" >> ${OUTPUT_DIR}/start_tophat_qsubs.log
-echo "Number of jobs is ${NUM_JOBS} and this task id is ${SGE_TASK_ID} for sample ${SAMPLE_NAME}"
+echo -e "starting app for ${THIS_SAMPLE}. \
+Number of jobs is ${NUM_JOBS} and task id is ${SGE_TASK_ID}" | tee -a ${OUTPUT_DIR}/log
+
 
 #do it
+
+START=$(date +%s.%N)
+
 tophat	-p 4 \
-        -o ${OUTPUT_DIR}/${SAMPLE_NAME} \
+        -o ${OUTPUT_DIR}/${THIS_SAMPLE} \
 	--GTF ${GTF} \
 	--transcriptome-index  ${TRS_IDX} \
+        --library-type fr-firststrand \
 	${GENOME_IDX} \
-	${SAMPLES_DIR}/${READ_1} \
-	${SAMPLES_DIR}/${READ_2}
+	${INPUT_FILES}
+
+END=$(date +%s.%N)
+TOTAL_TIME=$(echo "$END - $START" | bc)
+
+#log what happened
+echo "exited with code $? for ${THIS_SAMPLE} after ${TOTAL_TIME} total time" | tee -a ${OUTPUT_DIR}/log
 
 
+exit
 
+===notes
 
-#### end tophat_array.qsub
+tophat manual
+https://ccb.jhu.edu/software/tophat/manual.shtml
