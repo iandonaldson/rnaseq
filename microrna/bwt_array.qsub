@@ -1,0 +1,140 @@
+#!/bin/bash 
+
+# bwt_array.qsub
+#
+# array run version of bowtie aligner
+# see http://http://bio-bwa.sourceforge.net/bwa.shtml
+# author: Ian Donaldson - i.donaldson@qmul.ac.uk
+#
+# usage
+# qsub -o logs -e logs -t 1-N bwt_array.qsub
+# where
+# N is th number of sample names
+# -o and -e specify paths to an exsting directory where output and error logs from each job will be posted
+# -t is the number of tasks (number of samples whose bam files should be merged)
+#
+# set these parameters
+PROJECT_DIR="/data/WHRI-GenomeCentre/shares/Projects/NGS_Projects/RNA_Sequencing/Shah_Divyen/GC-DS-5102/Analysis/ian_analysis"
+INPUT_DIR=${PROJECT_DIR}/results_cutadapt
+SAMPLE_NAMES=${PROJECT_DIR}/mandate/sample_names
+OUTPUT_DIR=${PROJECT_DIR}/results_bwt_il
+
+#bowtie specific settings
+GENOME_IDX=/data/WHRI-GenomeCentre/data/ref/hg19/bwt/hg19_ERCC92
+
+
+###
+# no changes required beyond this point
+###
+
+
+
+# job setup
+##$ -m bes
+#$ -M i.donaldson@qmul.ac.uk
+#$ -cwd
+#$ -V    
+#$ -pe smp 4
+#$ -l h_rt=24:0:0
+#$ -l h_vmem=6G   
+#$ -N bowtie_il
+
+#file names will be of the form
+#RLHC9-DBS_S5_L001.trimmed.fastq.gz
+#RLHC9-DBS_S5_L002.trimmed.fastq.gz
+#RLHC9-DBS_S5_L003.trimmed.fastq.gz
+#RLHC9-DBS_S5_L004.trimmed.fastq.gz
+#note four lanes per sample
+
+
+#and sample_names will be of the form
+#RLHC9-DBS
+#retrieved to mandate/sample_names files using something like:
+#ls -1 *.gz | cut -d '_' -f 1 | sort | uniq > sample_names
+
+
+#retrieve the variables for the job from the mandate file
+THIS_SAMPLE=$(sed -n -e "$SGE_TASK_ID p" ${SAMPLE_NAMES})
+INPUT_FILES="${INPUT_DIR}/${THIS_SAMPLE}_*.fastq.gz"
+#note - four lanes, single read for each sample
+
+
+#check files exist
+for THIS_FILE in ${INPUT_FILES}; do
+   echo "checking ${THIS_FILE}";
+   if [ ! -e ${THIS_FILE} ]; then
+      echo "the file ${THIS_FILE} was not found. quitting";
+      exit;
+   fi
+done
+
+#make a comma separated list of input files
+FILE_LIST=$(echo ${INPUT_FILES} | sed 's/ /,/g')
+
+#all output files will be written to a single sub-directory for each task
+if [ ! -e ${OUTPUT_DIR}/${THIS_SAMPLE} ]; then mkdir -p ${OUTPUT_DIR}/${THIS_SAMPLE}; fi
+
+#all output files from all tasks will be written to a single sub-directory
+#if [ ! -e ${OUTPUT_DIR} ]; then mkdir -p ${OUTPUT_DIR}; fi
+
+
+#log what will be done for this specfic task
+NUM_JOBS=$(wc -l < ${SAMPLE_NAMES})
+echo -e "starting app for ${THIS_SAMPLE}. \
+Number of jobs is ${NUM_JOBS} and task id is ${SGE_TASK_ID} \
+Aligning ${FILE_LIST}." | tee -a ${OUTPUT_DIR}/log
+
+#load required modules
+module load bowtie2/2.0.0.beta6
+module load  samtools/0.1.18 
+
+#do it
+START=$(date +%s.%N)
+
+bowtie2	-p 4 \
+        -N 1 \
+        -L 10 \
+        --no-unal \
+        -x ${GENOME_IDX} \
+        -U ${FILE_LIST} \
+        -S ${OUTPUT_DIR}/${THIS_SAMPLE}/${THIS_SAMPLE}.sam
+
+BOWTIE_EXIT_CODE=$?
+
+END=$(date +%s.%N)
+TOTAL_TIME=$(echo "$END - $START" | bc)
+
+#log what happened
+echo "exited with code ${BOWTIE_EXIT_CODE} for ${THIS_SAMPLE} after ${TOTAL_TIME} total time" | tee -a ${OUTPUT_DIR}/log
+
+exit
+
+====notes
+
+bowtie2
+http://bowtie-bio.sourceforge.net/bowtie2/manual.shtml
+
+relevant settins see bowtie2 --help for full details
+Usage: 
+  bowtie2 [options]* -x <bt2-idx> {-1 <m1> -2 <m2> | -U <r>} [-S <sam>]
+
+  <bt2-idx>  Index filename prefix (minus trailing .X.bt2).
+             NOTE: Bowtie 1 and Bowtie 2 indexes are not compatible.
+  <m1>       Files with #1 mates, paired with files in <m2>.
+             Could be gzip'ed (extension: .gz) or bzip2'ed (extension: .bz2).
+  <m2>       Files with #2 mates, paired with files in <m1>.
+             Could be gzip'ed (extension: .gz) or bzip2'ed (extension: .bz2).
+  <r>        Files with unpaired reads.
+             Could be gzip'ed (extension: .gz) or bzip2'ed (extension: .bz2).
+  <sam>      File for SAM output (default: stdout)
+
+  -p/--threads <int> number of alignment threads to launch (1)
+  -N <int>           max # mismatches in seed alignment; can be 0 or 1 (0)
+  -L <int>           length of seed substrings; must be >3, <32 (22)
+  -D <int>           give up extending after <int> failed extends in a row (15)
+  -R <int>           for reads w/ repetitive seeds, try <int> sets of seeds (2)
+  -i <func>          interval between seed substrings w/r/t read len (S,1,1.15)
+  --very-fast            -D 5 -R 1 -N 0 -L 22 -i S,0,2.50
+
+
+####
