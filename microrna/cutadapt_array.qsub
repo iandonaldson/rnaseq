@@ -1,0 +1,160 @@
+#cutadapt_array.qsub
+#
+# array run version of cutadapt
+# see http://cutadapt.readthedocs.io/en/stable/guide.html
+# for trimming adapters from short sequence reads before miRNA alignment
+# http://seqanswers.com/wiki/Microrna_analysis
+# author: Ian Donaldson - i.donaldson@qmul.ac.uk
+#
+# usage
+# qsub -o logs -e logs -t 1-N cutadapt_array.qsub
+# where
+# N is th number of sample names
+# -o and -e specify paths to an exsting directory where output and error logs from each job will be posted
+# -t is the number of tasks (number of samples whose bam files should be merged)
+#
+# sample names are in the mandate/cutadapt_sample_names file
+
+# set these parameters
+PROJECT_DIR=/data/WHRI-GenomeCentre/shares/Projects/NGS_Projects/RNA_Sequencing/Shah_Divyen/GC-DS-5102/Analysis/ian_analysis
+INPUT_DIR=/data/WHRI-GenomeCentre/shares/Projects/NGS_Projects/RNA_Sequencing/Shah_Divyen/GC-DS-5102/Data/BaseSpaceDownload_21092016/GC-DS-5102-32318306/all_fastq
+SAMPLE_NAMES=${PROJECT_DIR}/mandate/cutadapt_sample_names
+OUTPUT_DIR=${PROJECT_DIR}/results_cutadapt2
+
+# only if cutadapt and trimgalore are not available as cluster modules 
+CUTADAPT=/data/home/wgw057/numpy_python/bin/cutadapt
+TRIMGALORE=/data/home/wgw057/tools/trim_galore/trim_galore_zip/trim_galore
+
+
+
+#note - fastq files are of the form
+#RLH25-1-DBS_S13_L001_R1_001.fastq.gz
+#and sample names for cutadapt look like
+#RLH25-1-DBS_S13_L001
+#as created by
+#ls -1 | cut -d '_' -f 1,2,3 > ~/projects/Divyen/mandate/cutadapt_sample_names 
+#there are four lanes per sample and only one read (R1)
+#each lane has to be processed separately by cutadapt
+#since it only takes one input file at a time
+
+###
+# no changes required beyond this point
+###
+
+
+
+# job setup
+##$ -m bes
+#$ -M i.donaldson@qmul.ac.uk
+#$ -cwd
+#$ -V    
+##$ -pe smp 4
+#$ -l h_rt=24:0:0
+##$ -l h_vmem=16G   
+#$ -N cutadapt
+
+#retrieve the variables for the job from the mandate file
+THIS_SAMPLE=$(sed -n -e "$SGE_TASK_ID p" ${SAMPLE_NAMES})
+INPUT_FILE="${INPUT_DIR}/${THIS_SAMPLE}_R1_001.fastq.gz"
+if [ ! -e ${INPUT_FILE} ]; then
+    echo "${INPUT_FILE} not found. quitting";
+    exit;
+fi
+
+
+#all output files will be written to a single sub-directory for each sample
+#if [ ! -e ${OUTPUT_DIR}/${THIS_SAMPLE} ]; then mkdir -p ${OUTPUT_DIR}/${THIS_SAMPLE}; fi
+
+#all output files will be written to a single directory for each sample
+if [ ! -e ${OUTPUT_DIR} ]; then mkdir -p ${OUTPUT_DIR}; fi
+
+
+#log what will be done for this specfic task
+echo -e "starting app for ${THIS_SAMPLE}. \
+Number of jobs is ${NUM_JOBS} and task id is ${SGE_TASK_ID}" | tee -a ${OUTPUT_DIR}/log
+
+
+#do it
+
+#note - using NEBNext 3' sr adaptor for illumina for -a (see project notes)
+
+${CUTADAPT} -f fastq \
+            -a AGATCGGAAGAGCACACGTCT \
+            -g GTTCAGAGTTCTACAGTCCGACGATC \
+            -e 0.15 \
+            -O 10 \
+            -m 14 \
+            -o ${OUTPUT_DIR}/${THIS_SAMPLE}.trimmed.fastq.gz \
+            ${INPUT_FILE}
+
+
+
+
+#log what happened
+echo "exited with code $? for ${THIS_SAMPLE}" | tee -a ${OUTPUT_DIR}/log
+
+exit
+
+####
+
+
+=== cutadapt installation
+https://cutadapt.readthedocs.io/en/stable/
+https://cutadapt.readthedocs.io/en/stable/installation.html
+use numpy_python environment (python 2.7.8):
+cd ~ 
+. numpy_python/bin/activate
+pip install --user --upgrade cutadapt
+cutadapt --help
+deactivate # to deactivate the python virtual environment
+installed at ~/numpy_python/bin/cutadapt 
+so path to exec is: 
+./data/homes/wgw057/numpy_python/bin/cutadapt
+
+
+=== cutadapt settings
+
+only settings used above are shown
+see cutadapt --help for complete docs
+
+  -f FORMAT, --format=FORMAT
+                        Input file format; can be either 'fasta', 'fastq' or
+                        'sra-fastq'. Ignored when reading csfasta/qual files.
+                        Default: auto-detect from file name extension.
+
+
+    -a ADAPTER, --adapter=ADAPTER
+                        Sequence of an adapter ligated to the 3' end (paired
+                        data: of the first read). The adapter and subsequent
+                        bases are trimmed. If a '$' character is appended
+                        ('anchoring'), the adapter is only found if it is a
+                        suffix of the read.
+    -g ADAPTER, --front=ADAPTER
+                        Sequence of an adapter ligated to the 5' end (paired
+                        data: of the first read). The adapter and any
+                        preceding bases are trimmed. Partial matches at the 5'
+                        end are allowed. If a '^' character is prepended
+                        ('anchoring'), the adapter is only found if it is a
+                        prefix of the read.
+
+    -e ERROR_RATE, --error-rate=ERROR_RATE
+                        Maximum allowed error rate (no. of errors divided by
+                        the length of the matching region). Default: 0.1
+
+    -O MINLENGTH, --overlap=MINLENGTH
+                        If the overlap between the read and the adapter is
+                        shorter than MINLENGTH, the read is not modified.
+                        Reduces the no. of bases trimmed due to random adapter
+                        matches. Default: 3
+
+    -m LENGTH, --minimum-length=LENGTH
+                        Discard trimmed reads that are shorter than LENGTH.
+                        Reads that are too short even before adapter removal
+                        are also discarded. In colorspace, an initial primer
+                        is not counted. Default: 0
+
+    -o FILE, --output=FILE
+                        Write trimmed reads to FILE. FASTQ or FASTA format is
+                        chosen depending on input. The summary report is sent
+                        to standard output. Use '{name}' in FILE to
+                        demultiplex reads into multiple files. Default: write
