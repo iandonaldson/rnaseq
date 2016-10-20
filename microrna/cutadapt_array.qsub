@@ -1,3 +1,5 @@
+#!/bin/bash
+
 #cutadapt_array.qsub
 #
 # array run version of cutadapt
